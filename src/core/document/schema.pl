@@ -8,6 +8,7 @@
               is_list_type/1,
               is_array_type/1,
               is_key/1,
+              is_documentation/1,
               refute_class/3,
               class_predicate_type/4,
               type_descriptor/3,
@@ -36,6 +37,7 @@
 :- use_module(core(query), [has_at/1, compress_dict_uri/3]).
 
 :- use_module(json). % This feels very circular.
+:- use_module(instance). % This is most definitely circular.
 
 is_unit(Class) :-
     global_prefix_expand(sys:'Unit', Class).
@@ -309,9 +311,7 @@ is_built_in(P) :-
             sys:inherits,
             sys:key,
             sys:base,
-            sys:value,
             sys:class,
-            sys:index,
             sys:abstract,
             sys:subdocument
         ],
@@ -407,10 +407,16 @@ is_key(Type) :-
     prefix_list([sys:'Lexical', sys:'Hash', sys:'ValueHash', sys:'Random'], List),
     memberchk(Type, List).
 
+is_documentation(Type) :-
+    prefix_list([sys:'SchemaDocumentation', sys:'PropertyDocumentation', sys:'Documentation'], List),
+    memberchk(Type, List).
+
 refute_class_key(Validation_Object,Class,Witness) :-
     database_schema(Validation_Object,Schema),
-    xrdf(Schema, Class, sys:key, Key_Obj),
-    refute_key_obj(Validation_Object,Class,Key_Obj, Witness).
+    xrdf_added(Schema, Class, sys:key, Key_Obj),
+    (   refute_key_obj(Validation_Object,Class,Key_Obj, Witness)
+    ->  true
+    ;   refute_existing_object_keys(Validation_Object,Class,Witness)).
 
 refute_key_obj(Validation_Object,Class,Obj,Witness) :-
     database_schema(Validation_Object,Schema),
@@ -425,11 +431,7 @@ refute_key_obj(Validation_Object,Class,Obj,Witness) :-
     xrdf(Schema, Obj, rdf:type, Type),
     prefix_list([sys:'Lexical', sys:'Hash'], List),
     memberchk(Type, List),
-    (   is_subdocument(Validation_Object, Class)
-    ->  Witness = witness{ '@type' : subdocument_key_must_be_random_or_value_hash,
-                           class: Class,
-                           key: Obj}
-    ;   xrdf(Schema, Obj, sys:fields, List_Obj)
+    (   xrdf(Schema, Obj, sys:fields, List_Obj)
     ->  (   rdf_list(Validation_Object,List_Obj,Fields)
         ->  member(Field,Fields),
             \+ class_predicate_type(Validation_Object, Class, Field, _),
@@ -659,7 +661,7 @@ key_base(_Validation_Object, Context, Type, Base) :-
     get_dict('@schema', Context, Schema),
     put_dict(_{'@base' : Schema}, Context, New_Context),
     compress_dict_uri(Type,New_Context,Type_Compressed),
-    atomic_list_concat([Type_Compressed,'_'],Base).
+    atomic_list_concat([Type_Compressed,'/'],Base).
 
 key_descriptor(Validation_Object, Type, Descriptor) :-
     database_prefixes(Validation_Object, Prefixes),
@@ -671,6 +673,8 @@ key_descriptor(Validation_Object, Prefixes, Type, Descriptor) :-
     xrdf(Schema, Type, sys:key, Obj),
     key_descriptor_(Validation_Object,Prefixes,Type,Obj,Descriptor),
     !.
+key_descriptor(Validation_Object, Prefixes, Type, base(Base)) :-
+    key_base(Validation_Object,Prefixes,Type,Base).
 
 key_descriptor_(Validation_Object, Prefixes, Type, Obj, lexical(Base,Fields)) :-
     database_schema(Validation_Object, Schema),

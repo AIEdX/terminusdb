@@ -76,12 +76,12 @@ make_db_public(System_Context,DB_Uri) :-
         _{
             '@type' : 'Capability',
             'scope' : DB_Uri,
-            'role' : [ 'consumer_role' ]
+            'role' : [ 'Role/consumer' ]
         },
         Capability_Uri),
 
     ask(System_Context,
-        (   insert(anonymous, capability, Capability_Uri))).
+        (   insert('User/anonymous', capability, Capability_Uri))).
 
 create_db_unfinalized(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, Db_Uri) :-
     % Run the initial checks and insertion of db object in system graph inside of a transaction.
@@ -150,35 +150,16 @@ default_schema_path(Organization_Name, Database_Name, Graph_Path) :-
     atomic_list_concat([Organization_Name, '/', Database_Name, '/',
                         "local/branch/main/schema/main"], Graph_Path).
 
+validate_prefixes(Prefixes) :-
+    forall(member(Prefix_Name, ['@base', '@schema']),
+           do_or_die(get_dict(Prefix_Name, Prefixes, _),
+                     error(missing_required_prefix(Prefix_Name), _))),
+    forall(get_dict(Prefix_Name, Prefixes, Prefix_Value),
+           do_or_die(uri_has_protocol(Prefix_Value),
+                     error(invalid_uri_prefix(Prefix_Name, Prefix_Value), _))).
+
 create_db(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes) :-
-    % FIXME! These checks should go away once the same checks in the schema
-    % checker can cause the database creation to fail.
-    do_or_die(get_dict('@base', Prefixes, Base_Prefix),
-              error(
-                  schema_check_failure(
-                      [witness{
-                          '@type': context_missing_system_prefix,
-                          prefix_name: 'http://terminusdb.com/schema/sys#base'}]), _)),
-    do_or_die(get_dict('@schema', Prefixes, Schema_Prefix),
-              error(
-                  schema_check_failure(
-                      [witness{
-                          '@type': context_missing_system_prefix,
-                          prefix_name: 'http://terminusdb.com/schema/sys#schema'}]), _)),
-    do_or_die(uri_has_protocol(Base_Prefix),
-              error(
-                  schema_check_failure(
-                      [witness{
-                          '@type': context_system_prefix_is_not_a_uri,
-                          prefix_name: 'http://terminusdb.com/schema/sys#base',
-                          prefix_value: Base_Prefix}]), _)),
-    do_or_die(uri_has_protocol(Schema_Prefix),
-              error(
-                  schema_check_failure(
-                      [witness{
-                          '@type': context_system_prefix_is_not_a_uri,
-                          prefix_name: 'http://terminusdb.com/schema/sys#schema',
-                          prefix_value: Schema_Prefix}]), _)),
+    validate_prefixes(Prefixes),
 
     create_db_unfinalized(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, Db_Uri),
 
@@ -204,7 +185,7 @@ test(create_db_and_check_master_branch, [
 :-
     Prefixes = _{ '@base' : 'http://somewhere/document', '@schema' : 'http://somewhere/schema' },
     open_descriptor(system_descriptor{}, System),
-    create_db(System, admin, admin, testdb, 'testdb', 'a test db', false, false, Prefixes),
+    create_db(System, 'User/admin', admin, testdb, 'testdb', 'a test db', false, false, Prefixes),
     Database_Descriptor = database_descriptor{
                               organization_name: "admin",
                               database_name: "testdb" },
