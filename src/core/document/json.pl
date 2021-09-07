@@ -186,13 +186,13 @@ raw(JValue,JValue).
 
 idgen_lexical(Base,Values,ID) :-
     maplist(raw,Values,Raw),
-    maplist(uri_encoded(path),Raw,Encoded),
+    maplist(uri_encoded(segment),Raw,Encoded),
     merge_separator_split(Suffix, '_', Encoded),
     format(string(ID), '~w~w', [Base,Suffix]).
 
 idgen_hash(Base,Values,ID) :-
     maplist(raw,Values,Raw),
-    maplist(uri_encoded(path),Raw,Encoded),
+    maplist(uri_encoded(segment),Raw,Encoded),
     merge_separator_split(String, '_', Encoded),
     sha_hash(String, Octets, []),
     hash_atom(Octets, Hash),
@@ -556,6 +556,12 @@ value_expand_list([Value|Vs], DB, Context, Elt_Type, [Expanded|Exs]) :-
 % Unit type expansion
 context_value_expand(_,_,[],json{},[]) :-
     !.
+context_value_expand(_,_,null,_,null) :-
+    !.
+context_value_expand(_,_,true,_,{"@type" : "xsd:boolean", "@value" : true}) :-
+    !.
+context_value_expand(_,_,false,_,{"@type" : "xsd:boolean", "@value" : false}) :-
+    !.
 context_value_expand(DB,Context,Value,Expansion,V) :-
     get_dict('@container', Expansion, _),
     !,
@@ -681,7 +687,7 @@ type_family_parts(JSON,[Family,Class]) :-
 type_family_id(JSON,Context,Path,ID) :-
     path_component(Path,Context,Component),
     type_family_parts(JSON,Parts),
-    maplist(uri_encoded(path),Parts,Encoded),
+    maplist(uri_encoded(segment),Parts,Encoded),
     merge_separator_split(Type_String,'_',Encoded),
     append(Component, [Type_String], Total),
     merge_separator_split(Merged,'/',Total),
@@ -699,7 +705,7 @@ key_id(JSON,Context,Path,ID) :-
     path_component([type(Type),property(key)|Path], Context, [Path_String]),
     (   Fields = []
     ->  Total = [Path_String]
-    ;   maplist(uri_encoded(path),Fields,Encoded),
+    ;   maplist(uri_encoded(segment),Fields,Encoded),
         merge_separator_split(Fields_String,'_',Encoded),
         Total = [Path_String,Fields_String]
     ),
@@ -713,7 +719,7 @@ property_part(JSON,Keys) :-
 property_id(JSON,Context,Path,ID) :-
     path_component(Path,Context,Component),
     property_part(JSON,Keys),
-    maplist(uri_encoded(path),Keys,Encoded),
+    maplist(uri_encoded(segment),Keys,Encoded),
     merge_separator_split(Key_String,'_',Encoded),
     append(Component,[Key_String], Total),
     merge_separator_split(Merged,'/',Total),
@@ -1123,6 +1129,8 @@ json_triple_(JSON,Context,Triple) :-
     ;   (   Value = []
         ->  global_prefix_expand(rdf:nil,RDF_Nil),
             Triple = t(ID,Key,RDF_Nil)
+        ;   Value = null
+        ->  fail
         ;   get_dict('@id', Value, Value_ID)
         ->  (   json_triple_(Value, Context, Triple)
             ;   Triple = t(ID,Key,Value_ID)
@@ -2242,13 +2250,13 @@ test(write_json_stream_to_builder, [
         t("http://terminusdb.com/system/schema#User/capability/Set_Capability",
           "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
           node("http://terminusdb.com/schema/sys#Set")),
-        t("terminusdb://Prefix_Pair/93538b446fef31f7eef2e4d45f7addf0aa1d4ad5",
+        t("terminusdb://Prefix_Pair/7de63588111a7e39f87e3f5cb597edc2a2f1023d",
           "http://terminusdb.com/schema/sys#prefix",
           value("\"type\"^^'http://www.w3.org/2001/XMLSchema#string'")),
-        t("terminusdb://Prefix_Pair/93538b446fef31f7eef2e4d45f7addf0aa1d4ad5",
+        t("terminusdb://Prefix_Pair/7de63588111a7e39f87e3f5cb597edc2a2f1023d",
           "http://terminusdb.com/schema/sys#url",
           value("\"http://terminusdb.com/type#\"^^'http://www.w3.org/2001/XMLSchema#string'")),
-        t("terminusdb://Prefix_Pair/93538b446fef31f7eef2e4d45f7addf0aa1d4ad5",
+        t("terminusdb://Prefix_Pair/7de63588111a7e39f87e3f5cb597edc2a2f1023d",
           "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
           node("http://terminusdb.com/schema/sys#Prefix")),
         t("terminusdb://context",
@@ -2256,7 +2264,7 @@ test(write_json_stream_to_builder, [
           value("\"terminusdb://system/data/\"^^'http://www.w3.org/2001/XMLSchema#string'")),
         t("terminusdb://context",
           "http://terminusdb.com/schema/sys#prefix_pair",
-          node("terminusdb://Prefix_Pair/93538b446fef31f7eef2e4d45f7addf0aa1d4ad5")),
+          node("terminusdb://Prefix_Pair/7de63588111a7e39f87e3f5cb597edc2a2f1023d")),
         t("terminusdb://context",
           "http://terminusdb.com/schema/sys#schema",
           value("\"http://terminusdb.com/system/schema#\"^^'http://www.w3.org/2001/XMLSchema#string'")),
@@ -4889,6 +4897,71 @@ test(subdocument_lexical_key,
                          '@type':'Not_A_Squash',
                          genus:"Malus Mill"}}.
 
+test(subdocument_lexical_key_with_odd_chars,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 test_document_label_descriptor(Desc),
+                 write_schema(schema2,Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         )
+     ]) :-
+
+    Has_Non_Squash =
+    _{ '@id' : "Has_Non_Squash",
+       '@type' : "Class",
+       '@key' : _{ '@type' : "Lexical",
+                   '@fields' : ["me"]},
+       me : "xsd:string",
+       non_squash : "Not_A_Squash"
+     },
+
+    Not_A_Squash =
+    _{ '@id' : "Not_A_Squash",
+       '@type' : "Class",
+       '@subdocument' : [],
+       '@key' : _{ '@type' : "Lexical",
+                   '@fields' : ["genus"]},
+       genus : "xsd:string"
+     },
+
+    create_context(Desc, _{ author : "me", message : "Adding context" }, Context),
+    with_transaction(
+        Context,
+        (   insert_schema_document(Context, Not_A_Squash),
+            insert_schema_document(Context, Has_Non_Squash)
+        ),
+        _
+    ),
+
+    Document =
+    _{ '@type' : "Has_Non_Squash",
+       me : "Its / me",
+       non_squash : _{ '@type' : "Not_A_Squash",
+                       genus : "Malus / Mill" }},
+
+
+    create_context(Desc, _{ author : "me", message : "Adding doc." }, Context2),
+    with_transaction(
+        Context2,
+        insert_document(Context2, Document,Id),
+        _
+    ),
+
+    get_document(Desc, Id, Assigned),
+    !,
+
+    Assigned =
+    json{'@id':'Has_Non_Squash/Its%20%2F%20me',
+         '@type':'Has_Non_Squash',
+         me:"Its / me",
+         non_squash:json{'@id': 'Has_Non_Squash/Its%20%2F%20me/non_squash/Not_A_Squash/Malus%20%2F%20Mill',
+                         '@type':'Not_A_Squash',
+                         genus:"Malus / Mill"}}.
+
+
 test(document_with_no_required_field,
      [
          setup(
@@ -5075,6 +5148,46 @@ test(alter_documentation,
     get_schema_document(DB, 'Doc001', JSON),
 
     "comment 02" = (JSON.'@documentation'.'@comment').
+
+test(elaborate_null,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 create_db_with_empty_schema("admin", "foo"),
+                 resolve_absolute_string_descriptor("admin/foo", Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         )
+     ]) :-
+
+    Class = _{ '@type': "Class",
+               '@id': "Doc",
+               s : "xsd:string"
+             },
+
+    create_context(Desc, _{ author : "me", message : "Have you tried bitcoin?" }, Context),
+    with_transaction(
+        Context,
+        insert_schema_document(Context, Class),
+        _
+    ),
+
+    Document = _{ '@type' : "Doc",
+                  s : null },
+
+
+    open_descriptor(Desc, DB),
+    json_elaborate(DB, Document, Elaborated),
+
+    database_prefixes(DB,Prefixes),
+    findall(Triple, json_triple_(Elaborated,Prefixes,Triple), Triples),
+
+    Triples = [
+        t(_,
+          'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+          'http://somewhere.for.now/schema#Doc')
+    ].
 
 :- end_tests(json).
 
