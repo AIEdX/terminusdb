@@ -1,6 +1,6 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1629993406410,
-  "repoUrl": "https://github.com/terminusdb/terminusdb",
+  "lastUpdate": 1631351371255,
+  "repoUrl": "https://github.com/AIEdX/terminusdb",
   "entries": {
     "Benchmark": [
       {
@@ -5935,6 +5935,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "/api/ok::GET:http_req_duration:p(90)",
             "value": 44.193,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "32054618+adssidhu86@users.noreply.github.com",
+            "name": "Amardeep Singh Sidhu",
+            "username": "adssidhu86"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0db10cbf9e7cbf2c7a6cf2005e5c22dff261843c",
+          "message": "Merge pull request #4 from terminusdb/main\n\nschema replacement error",
+          "timestamp": "2021-09-11T14:34:28+05:30",
+          "tree_id": "4c34b0e38e3703bbb89e5be90542d466dd5ee8f0",
+          "url": "https://github.com/AIEdX/terminusdb/commit/0db10cbf9e7cbf2c7a6cf2005e5c22dff261843c"
+        },
+        "date": 1631351370111,
+        "tool": "generic",
+        "benches": [
+          {
+            "name": "/api/db::DELETE:http_req_duration:p(90)",
+            "value": 344.901,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/db::POST:http_req_duration:p(90)",
+            "value": 1090.831,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/db:prefixes:POST:http_req_duration:p(90)",
+            "value": 1071.099,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:one:POST:http_req_duration:p(90)",
+            "value": 576.855,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:person:POST:http_req_duration:p(90)",
+            "value": 580.473,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:woql:POST:http_req_duration:p(90)",
+            "value": 137.378,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/info::GET:http_req_duration:p(90)",
+            "value": 45.385,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/ok::GET:http_req_duration:p(90)",
+            "value": 45.305,
             "unit": "ms"
           }
         ]
