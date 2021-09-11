@@ -1094,13 +1094,14 @@ api_document_error_jsonld(Type, error(no_commit_message, _), JSON) :-
              'api:error' : _{ '@type' : 'api:NoCommitMessageSpecified' },
              'api:message' : Msg
             }.
-api_document_error_jsonld(Type, error(same_ids_in_one_transaction(Ids, _)), JSON) :-
+api_document_error_jsonld(Type, error(same_ids_in_one_transaction(Ids), _), JSON) :-
     document_error_type(Type, JSON_Type),
-    format(string(Msg), "Tried to mutate document with same id multiple times", [Ids]),
+
+    format(string(Msg), "Tried to mutate document with same id multiple times", []),
     JSON = _{'@type' : JSON_Type,
              'api:status' : "api:failure",
              'api:error' : _{ '@type' : 'api:SameDocumentIdsMutatedInOneTransaction',
-                              'api:document_ids' : Ids},
+                              'api:duplicate_ids' : Ids},
              'api:message' : Msg
             }.
 api_document_error_jsonld(Type, error(document_access_impossible(Descriptor, Graph_Type, Read_Write), _), JSON) :-
@@ -1161,14 +1162,14 @@ api_document_error_jsonld(Type, error(id_could_not_be_elaborated(Document),_),JS
                               'api:document' : Document },
              'api:message' : Msg
             }.
-api_document_error_jsonld(Type, error(submitted_id_does_not_match_base(Submitted_ID, Base, Document),_),JSON) :-
+api_document_error_jsonld(Type, error(submitted_document_id_does_not_have_expected_prefix(Submitted_ID, Prefix, Document),_),JSON) :-
     document_error_type(Type, JSON_Type),
-    format(string(Msg), "Document was submitted with id ~q which does not match base ~q", [Submitted_ID, Base]),
+    format(string(Msg), "Document id ~q does not have expected prefix ~q", [Submitted_ID, Prefix]),
     JSON = _{'@type' : JSON_Type,
              'api:status' : "api:failure",
-             'api:error' : _{ '@type' : 'api:SubmittedIdDoesNotMatchBase',
+             'api:error' : _{ '@type' : 'api:SubmittedDocumentIdDoesNotHaveExpectedPrefix',
                               'api:submitted_id': Submitted_ID,
-                              'api:base': Base,
+                              'api:prefix': Prefix,
                               'api:document' : Document },
              'api:message' : Msg
             }.
@@ -1205,19 +1206,19 @@ api_document_error_jsonld(Type, error(casting_error(Value, Destination_Type, Doc
                               'api:document' : Document },
              'api:message' : Msg
             }.
-api_document_error_jsonld(get_documents, error(skip_is_not_a_number(Skip_Atom), _), JSON) :-
-    format(string(Msg), "specified skip count is not a number: ~q", [Skip_Atom]),
+api_document_error_jsonld(get_documents, error(skip_is_not_an_integer(Skip_Atom), _), JSON) :-
+    format(string(Msg), "specified skip count is not an integer: ~q", [Skip_Atom]),
     JSON = _{'@type' : 'api:GetDocumentErrorResponse',
              'api:status' : "api:failure",
-             'api:error' : _{ '@type' : 'api:SkipNotANumber',
+             'api:error' : _{ '@type' : 'api:SkipNotAnInteger',
                               'api:skip' : Skip_Atom },
              'api:message' : Msg
             }.
-api_document_error_jsonld(get_documents, error(count_is_not_a_number(Count_Atom), _), JSON) :-
-    format(string(Msg), "specified retrieval count is not a number: ~q", [Count_Atom]),
+api_document_error_jsonld(get_documents, error(count_is_not_an_integer(Count_Atom), _), JSON) :-
+    format(string(Msg), "specified retrieval count is not an integer: ~q", [Count_Atom]),
     JSON = _{'@type' : 'api:GetDocumentErrorResponse',
              'api:status' : "api:failure",
-             'api:error' : _{ '@type' : 'api:CountNotANumber',
+             'api:error' : _{ '@type' : 'api:CountNotAnInteger',
                               'api:count' : Count_Atom },
              'api:message' : Msg
             }.
@@ -1259,6 +1260,23 @@ api_document_error_jsonld(insert_documents, error(can_not_insert_existing_object
              'api:error' : _{ '@type' : 'api:DocumentIdAlreadyExists',
                               'api:document_id' : Id,
                               'api:document' : Document},
+             'api:message' : Msg
+            }.
+api_document_error_jsonld(insert_documents, error(no_context_found_in_schema, _), JSON) :-
+    format(string(Msg), "No context found in submitted schema", []),
+    JSON = _{'@type' : 'api:InsertDocumentErrorResponse',
+             'api:status' : "api:failure",
+             'api:error' : _{ '@type' : 'api:NoContextFoundInSchema'},
+             'api:message' : Msg
+            }.
+api_document_error_jsonld(replace_documents, error(document_does_not_exist(Id, Document), _), JSON) :-
+    format(string(Msg), "Document submitted for replacement, but original is not found for ID ~q", [Id]),
+    JSON = _{'@type' : 'api:ReplaceDocumentErrorResponse',
+             'api:status' : "api:not_found",
+             'api:error' : _{ '@type' : 'api:OriginalDocumentNotFound',
+                              'api:document_id' : Id,
+                              'api:replacement_document': Document
+                            },
              'api:message' : Msg
             }.
 api_document_error_jsonld(delete_documents, error(document_does_not_exist(Id), _), JSON) :-

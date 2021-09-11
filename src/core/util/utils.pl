@@ -49,6 +49,7 @@
               op(1100,xfy,<>),
               '<>'/2,
               do_or_die/2,
+              die_if/2,
               whole_arg/2,
               random_string/1,
               uri_has_protocol/1,
@@ -63,7 +64,10 @@
               time_to_internal_time/2,
               datetime_to_internal_datetime/2,
               json_read_dict_stream/2,
-              skip_generate_nsols/3
+              skip_generate_nsols/3,
+              input_to_integer/2,
+              duplicates/2,
+              has_duplicates/2
           ]).
 
 /** <module> Utils
@@ -107,6 +111,17 @@ do_or_die(Goal, Error) :-
     (   call(Goal)
     ->  true
     ;   throw(Error)).
+
+/*
+ * die_if(:Goal1,:Goal2) is det
+ *
+ * Deterministic
+ */
+:- meta_predicate die_if(:,?).
+die_if(Goal, Error) :-
+    (   call(Goal)
+    ->  throw(Error)
+    ;   true).
 
 /**
  * get_key(+Key,+Object,-Val,+Default) is det.
@@ -893,3 +908,33 @@ skip_generate_nsols(Goal, Skip, Count) :-
     (   Count = unlimited
     ->  offset(Skip, Goal)
     ;   limit(Count, offset(Skip, Goal))).
+
+input_to_integer(Atom, Integer) :-
+    (   integer(Atom)
+    ->  Integer = Atom
+    ;   error:text(Atom)
+    ->  atom_number(Atom, Integer),
+        integer(Integer)).
+
+:- use_module(library(lists)).
+duplicates([], []) :- !.
+duplicates(List, Duplicates) :-
+    msort(List, Sorted),
+
+    [First|Rest] = Sorted,
+
+    duplicates_(Rest, First, Duplicates).
+
+duplicates_([], _, []).
+duplicates_([First,First|Rest], _, Duplicates) :-
+    !,
+    duplicates_([First|Rest], First, Duplicates).
+duplicates_([First|Rest], First, [First|Duplicates]) :-
+    !,
+    duplicates_(Rest, First, Duplicates).
+duplicates_([First|Rest], _, Duplicates) :-
+    duplicates_(Rest, First, Duplicates).
+
+has_duplicates(List, Duplicates) :-
+    duplicates(List, Duplicates),
+    Duplicates \= [].

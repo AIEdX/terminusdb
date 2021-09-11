@@ -24,17 +24,17 @@ document_auth_action_type(Descriptor_Type, Graph_Type_String, ReadWrite_String, 
     atom_string(ReadWrite, ReadWrite_String),
 
     document_auth_action_type_(Descriptor_Type, Graph_Type, ReadWrite, Action).
-document_auth_action_type_(system_descriptor, _, _, '@schema':'Action_manage_capabilities').
-document_auth_action_type_(database_descriptor, _, read, '@schema':'Action_meta_read_access').
-document_auth_action_type_(database_descriptor, instance, write, '@schema':'Action_meta_write_access').
-document_auth_action_type_(repository_descriptor, _, read, '@schema':'Action_commit_read_access').
-document_auth_action_type_(repository_descriptor, instance, write, '@schema':'Action_commit_write_access').
-document_auth_action_type_(branch_descriptor, instance, read, '@schema':'Action_instance_read_access').
-document_auth_action_type_(branch_descriptor, instance, write, '@schema':'Action_instance_write_access').
-document_auth_action_type_(branch_descriptor, schema, read, '@schema':'Action_schema_read_access').
-document_auth_action_type_(branch_descriptor, schema, write, '@schema':'Action_schema_write_access').
-document_auth_action_type_(commit_descriptor, instance, read, '@schema':'Action_instance_read_access').
-document_auth_action_type_(commit_descriptor, schema, read, '@schema':'Action_schema_read_access').
+document_auth_action_type_(system_descriptor, _, _, '@schema':'Action/manage_capabilities').
+document_auth_action_type_(database_descriptor, _, read, '@schema':'Action/meta_read_access').
+document_auth_action_type_(database_descriptor, instance, write, '@schema':'Action/meta_write_access').
+document_auth_action_type_(repository_descriptor, _, read, '@schema':'Action/commit_read_access').
+document_auth_action_type_(repository_descriptor, instance, write, '@schema':'Action/commit_write_access').
+document_auth_action_type_(branch_descriptor, instance, read, '@schema':'Action/instance_read_access').
+document_auth_action_type_(branch_descriptor, instance, write, '@schema':'Action/instance_write_access').
+document_auth_action_type_(branch_descriptor, schema, read, '@schema':'Action/schema_read_access').
+document_auth_action_type_(branch_descriptor, schema, write, '@schema':'Action/schema_write_access').
+document_auth_action_type_(commit_descriptor, instance, read, '@schema':'Action/instance_read_access').
+document_auth_action_type_(commit_descriptor, schema, read, '@schema':'Action/schema_read_access').
 
 assert_document_auth(SystemDB, Auth, Descriptor, Graph_Type, ReadWrite) :-
     Descriptor_Type{} :< Descriptor,
@@ -155,7 +155,7 @@ known_document_error(can_not_insert_existing_object_with_id(_)).
 known_document_error(unrecognized_property(_,_,_)).
 known_document_error(casting_error(_,_)).
 known_document_error(submitted_id_does_not_match_generated_id(_,_)).
-known_document_error(submitted_id_does_not_match_base(_,_)).
+known_document_error(submitted_document_id_does_not_have_expected_prefix(_,_)).
 
 :- meta_predicate call_catch_document_mutation(+, :).
 call_catch_document_mutation(Document, Goal) :-
@@ -214,7 +214,7 @@ api_insert_documents(SystemDB, Auth, Path, Schema_Or_Instance, Author, Message, 
                      ->  replace_existing_graph(Schema_Or_Instance, Transaction, Stream),
                          Ids = []
                      ;   findall(Id, api_insert_document_(Schema_Or_Instance, Transaction, Stream, Id), Ids),
-                         do_or_die(is_set(Ids), error(same_ids_in_one_transaction(Ids), _))),
+                         die_if(has_duplicates(Ids, Duplicates), error(same_ids_in_one_transaction(Duplicates), _))),
                      _).
 
 api_delete_document_(schema, Transaction, Id) :-
@@ -311,7 +311,7 @@ api_replace_documents(SystemDB, Auth, Path, Schema_Or_Instance, Author, Message,
                                                                Transaction,Document, Id))
                                  ),
                                  Ids),
-                         do_or_die(is_set(Ids), error(same_ids_in_one_transaction(Ids), _))
+                         die_if(has_duplicates(Ids, Duplicates), error(same_ids_in_one_transaction(Duplicates), _))
                      ),
                      _).
 

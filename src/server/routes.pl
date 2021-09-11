@@ -587,13 +587,15 @@ test(triples_update, [
     % First make the schema graph
 
     read_file_to_string(TTL_File, TTL, []),
-
+    %Server2 = 'http://127.0.0.1:6363',
+    %writeq(Server2),
     atomic_list_concat([Server, '/api/triples/admin/TEST_DB/local/branch/main/instance'], URI),
     admin_pass(Key),
     http_post(URI, json(_{commit_info : _{ author : "Test",
                                            message : "testing" },
                           turtle : TTL}),
               _In, [json_object(dict),
+                    status_code(_),
                     authorization(basic(admin, Key)),
                     cert_verify_hook(cert_accept_any),
                     reply_header(_)]),
@@ -604,7 +606,6 @@ test(triples_update, [
             Triples),
 
     memberchk('http://terminusdb.com/schema/system#Capability'-(rdf:type)-(sys:'Class'), Triples),
-
 
     findall(A-B-C,
             ask(Branch_Descriptor,
@@ -645,8 +646,8 @@ layer:LayerIdRestriction a owl:Restriction.",
     http_put(URI, json(_{commit_info : _{ author : "Test",
                                            message : "testing" },
                          turtle : TTL}),
-             _Result1, [json_object(dict),
-                        authorization(basic(admin, Key))]),
+             _Result, [json_object(dict),
+                       authorization(basic(admin, Key))]),
 
     TTL2 = "
 @prefix layer: <http://terminusdb.com/schema/layer#> .
@@ -767,21 +768,21 @@ document_handler(get, Path, Request, System_DB, Auth) :-
             (   (   get_dict(skip, Posted, Skip_Atom)
                 ->  true
                 ;   memberchk(skip=Skip_Atom, Search))
-            ->  do_or_die(atom_number(Skip_Atom, Skip),
-                          error(skip_is_not_a_number(Skip_Atom), _))
+            ->  do_or_die(input_to_integer(Skip_Atom, Skip),
+                          error(skip_is_not_an_integer(Skip_Atom),_))
             ;   Skip = 0),
             (   (   get_dict(count, Posted, Count_Atom)
                 ->  true
                 ;   memberchk(count=Count_Atom, Search))
-            ->  do_or_die(atom_number(Count_Atom, Count),
-                          error(count_is_not_a_number(Count_Atom), _))
+            ->  do_or_die(input_to_integer(Count_Atom, Count),
+                          error(count_is_not_an_integer(Count_Atom),_))
             ;   Count = unlimited),
 
-            (   (   get_dict(minimized, Posted, true)
+            (   (   get_dict(minimized, Posted, false)
                 ->  true
-                ;   memberchk(minimized=true, Search))
-            ->  JSON_Options = [width(0)]
-            ;   JSON_Options = []),
+                ;   memberchk(minimized=false, Search))
+            ->  JSON_Options = []
+            ;   JSON_Options = [width(0)]),
 
             (   (   get_dict(as_list, Posted, true)
                 ->  true
@@ -1590,13 +1591,12 @@ test(fetch_second_time_with_change, [
                  time_limit(infinite),
                  methods([options,post])]).
 
-
 rebase_handler(post, Path, Request, System_DB, Auth) :-
+    check_content_type_json(Request),
+    get_payload(Document,Request),
     do_or_die(
-        (   get_payload(Document, Request),
-            _{ author : Author,
-               rebase_from : Their_Path } :< Document
-        ),
+        (_{ author : Author,
+            rebase_from : Their_Path } :< Document),
         error(bad_api_document(Document,[author,rebase_from]),_)),
 
     api_report_errors(
