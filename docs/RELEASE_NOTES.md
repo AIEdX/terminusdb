@@ -1,3 +1,19 @@
+# TerminusDB Server v10.0.2 Beta Release Notes
+
+## New
++ Enable keys with collections or optional fields
++ Include release management document
+
+## Bug fixes
++ Better managment of keys and key error reporting
+
+# TerminusDB Server v10.0.1 Beta Release Notes
+
+## Bug fixes
+
++ Numerous bug fixes
++ Error reporting improvements
+
 # TerminusDB Server v10.0.0 Beta Release Notes
 
 ## New
