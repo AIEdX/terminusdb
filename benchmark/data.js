@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1631351371255,
+  "lastUpdate": 1631871087289,
   "repoUrl": "https://github.com/AIEdX/terminusdb",
   "entries": {
     "Benchmark": [
@@ -5999,6 +5999,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "/api/ok::GET:http_req_duration:p(90)",
             "value": 45.305,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "32054618+adssidhu86@users.noreply.github.com",
+            "name": "Amardeep Singh Sidhu",
+            "username": "adssidhu86"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5316de816294169f9507ec6484388ed544d61ef1",
+          "message": "Merge pull request #5 from terminusdb/main\n\nImprove schema level handling , release 10.2",
+          "timestamp": "2021-09-17T14:57:42+05:30",
+          "tree_id": "56c734b13e7b06fce2f392676b2ae75915c56637",
+          "url": "https://github.com/AIEdX/terminusdb/commit/5316de816294169f9507ec6484388ed544d61ef1"
+        },
+        "date": 1631871086577,
+        "tool": "generic",
+        "benches": [
+          {
+            "name": "/api/db::DELETE:http_req_duration:p(90)",
+            "value": 128.588,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/db::POST:http_req_duration:p(90)",
+            "value": 383.903,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/db:prefixes:POST:http_req_duration:p(90)",
+            "value": 396.682,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:one:POST:http_req_duration:p(90)",
+            "value": 223.126,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:person:POST:http_req_duration:p(90)",
+            "value": 239.447,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/document:woql:POST:http_req_duration:p(90)",
+            "value": 135.123,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/info::GET:http_req_duration:p(90)",
+            "value": 53.747,
+            "unit": "ms"
+          },
+          {
+            "name": "/api/ok::GET:http_req_duration:p(90)",
+            "value": 41.975,
             "unit": "ms"
           }
         ]
