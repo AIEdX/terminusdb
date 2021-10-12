@@ -217,6 +217,24 @@ get_field_values(JSON,DB,Context,Fields,Values) :-
         ),
         Values).
 
+untyped_typecast(V, Type, Val, Val_Type) :-
+    (   string(V)
+    ->  typecast(V^^xsd:string,
+                 Type, [], Val^^Val_Type)
+    ;   atom(V),
+        atom_string(V,String)
+    ->  typecast(String^^xsd:string,
+                 Type, [], Val^^Val_Type)
+    ;   number(V)
+    ->  typecast(V^^xsd:decimal,
+                 Type, [], Val^^Val_Type)).
+
+normalize_json_value(V, Type, Val) :-
+    global_prefix_expand_safe(Type, TE),
+
+    untyped_typecast(V, TE, Casted, Casted_Type),
+    typecast(Casted^^Casted_Type, xsd:string, [], Val^^_).
+
 raw(JValue,Value) :-
     is_dict(JValue),
     !,
@@ -229,12 +247,16 @@ raw(JValue,Value) :-
         ;   [Single_Value] = V
         ->  raw(Single_Value, Value)
         ;   \+ is_list(V)
-        ->  Value = V
+        ->  get_dict('@type', JValue, Value_Type),
+            normalize_json_value(V, Value_Type, Value)
         ;   (   Container_Type = "@set"
             ->  sort(V, V_1)
             ;   V_1 = V),
             maplist(raw, V_1, V_Raw),
             Value = list(V_Raw))
+    ;   get_dict('@type', JValue, Value_Type)
+    ->  get_dict('@value', JValue, Uncasted_Value),
+        normalize_json_value(Uncasted_Value, Value_Type, Value)
     ;   get_dict('@value', JValue, Value)
     ).
 raw(JValue,JValue).
@@ -1000,6 +1022,8 @@ json_schema_predicate_value('@cardinality',V,_,_,P,json{'@type' : Type,
 json_schema_predicate_value('@key',V,Context,Path,P,Value) :-
     !,
     global_prefix_expand(sys:key, P),
+    do_or_die(is_dict(V),
+              error(document_key_not_object(V), _)),
     json_schema_elaborate_key(V,Context,Elab),
     key_id(V,Context,Path,ID),
     put_dict(_{'@id' : ID}, Elab, Value).
@@ -5507,6 +5531,136 @@ test(boolean_in_boolean_field,
         _
     ).
 
+test(round_trip_float,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 create_db_with_empty_schema("admin", "foo"),
+                 resolve_absolute_string_descriptor("admin/foo", Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         )
+     ]) :-
+
+    Geo_Schema_Atom = '{ "@type" : "Class",
+      "@id" : "GeoCoordinate",
+      "@subdocument" : [],
+      "@key" : { "@type" : "Lexical",
+                 "@fields" : ["latitude", "longitude"] },
+      "latitude" : "xsd:decimal",
+      "longitude" : "xsd:decimal"
+    }',
+
+    atom_json_dict(Geo_Schema_Atom, Geo_Schema, []),
+
+    Geo_Atom = '{
+        "@type": "GeoCoordinate",
+        "latitude": "41.2008",
+        "longitude": "0.5679"
+    }',
+
+    atom_json_dict(Geo_Atom, Geo, []),
+
+
+    with_test_transaction(Desc,
+                          C1,
+                          insert_schema_document(
+                              C1,
+                              Geo_Schema)
+                          ),
+
+    with_test_transaction(Desc,
+                          C2,
+                          insert_document(
+                                  C2,
+                                  Geo,
+                                  Uri)),
+    get_document(Desc, Uri, Doc),
+
+    Doc = json{'@id':'GeoCoordinate/41.2008+0.5679',
+               '@type':'GeoCoordinate',
+               latitude:41.2008,
+               longitude:0.5679}.
+
+:- use_module(core(query)).
+test(status_update,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 create_db_with_empty_schema("admin", "foo"),
+                 resolve_absolute_string_descriptor("admin/foo", Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         ),
+         error(schema_check_failure(
+                   [
+                       witness{'@type':instance_not_of_class,
+                               class:'http://somewhere.for.now/schema#Status',
+                               instance:'http://somewhere.for.now/document/Status/inactive'
+                              }
+                   ]),
+               _)
+     ]) :-
+
+    Enum_Atom = '
+      { "@type" : "Enum",
+        "@id" : "Status",
+        "@value" : [ "active", "inactive" ]
+      }',
+    Object_Atom = '
+      { "@type" : "Class",
+        "@id" : "Object",
+        "@key" : { "@type" : "Lexical",
+                   "@fields" : ["name"] },
+        "name" : "xsd:string",
+        "status" : "Status"
+      }',
+
+    atom_json_dict(Enum_Atom, Enum, []),
+    atom_json_dict(Object_Atom, Object, []),
+    writeq(here),
+    with_test_transaction(Desc,
+                          C1,
+                          (   insert_schema_document(
+                                  C1,
+                                  Enum),
+                              insert_schema_document(
+                                  C1,
+                                  Object)
+                          )
+                         ),
+
+    Doc_Atom = '{
+        "@type": "Object",
+        "name": "foo",
+        "status": "active"
+    }',
+
+    atom_json_dict(Doc_Atom, Doc, []),
+
+
+    with_test_transaction(Desc,
+                          C2,
+                          insert_document(
+                                  C2,
+                                  Doc,
+                                  Uri)),
+
+    with_test_transaction(
+        Desc,
+        C3,
+        ask(C3,
+            (   t(Uri, name, "foo"^^xsd:string),
+                t(Uri, status, Status),
+                delete(Uri, status, Status),
+                % Note: Instance prefix is used by default and not @schema
+                insert(Uri, status, 'Status/inactive')
+            )
+           )
+    ).
+
 :- end_tests(json).
 
 :- begin_tests(schema_checker).
@@ -7639,6 +7793,26 @@ test(underscore_space_slash_in_id,
            bar: (0.5),
            baz: "lo_there/buddy"},
         'Thing/hi_there%20buddy+0.5+lo_there%2Fbuddy').
+
+test(normalizable_float,
+     [setup((setup_temp_store(State),
+             create_db_with_empty_schema("admin","foo"),
+             resolve_absolute_string_descriptor("admin/foo", Desc)
+            )),
+      cleanup(teardown_temp_store(State))
+     ]) :-
+    test_generated_document_id(
+        Desc,
+
+        _{ '@type': "Class",
+           '@id': "Thing",
+           '@key': _{'@type': "Lexical",
+                     '@fields': ["foo"]},
+           foo: "xsd:float"},
+
+        _{ '@type': "Thing",
+           foo: "0.5000000"},
+        'Thing/0.5').
 
 
 :- end_tests(document_id_generation).

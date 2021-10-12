@@ -1,3 +1,34 @@
+# TerminusDB Server v10.0.6 Beta Release Notes
+## Bug fixes
++ Fix appimage build
++ Better error handling
+
+# TerminusDB Server v10.0.5 Beta Release Notes
+## Bug fixes
++ Update version number in info
+
+# TerminusDB Server v10.0.4 Beta Release Notes
+## New
++ New header `X-Operation-ID` for submitting an operation id which is included in json log records made during a request
++ All json log records made during a request now contain a requestId field
++ All authentication attempts are now logged
+
+## Bug fixes
++ Wrong version reported in the info endpoint
++ Key values not normalized properly in id generation
++ New empty branches have no context object
++ Banner message prints weekday locale-dependent in otherwise english message
++ Banner message prints server name incorrectly
+
+# TerminusDB Server v10.0.3 Beta Release Notes
+## New
++ Logging backend has been replaced with structured logging
+
+## Bug fixes
++ Floats not marshalled correctly
++ Fallback route handler for unknown paths
++ Improved error reporting
+
 # TerminusDB Server v10.0.2 Beta Release Notes
 
 ## New

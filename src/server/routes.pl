@@ -20,7 +20,6 @@
 :- use_module(core(account)).
 
 % http libraries
-:- use_module(library(http/http_log)).
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_server_files)).
 :- use_module(library(http/html_write)).
@@ -33,10 +32,14 @@
 :- use_module(library(http/http_cors)).
 :- use_module(library(http/json)).
 :- use_module(library(http/json_convert)).
+:- use_module(library(http/http_stream)).
+
 
 % multipart
 :- use_module(library(http/http_multipart_plugin)).
 :- use_module(library(http/mimepack)).
+
+:- use_module(library(broadcast)).
 
 % chunked
 %:- use_module(library(http/http_header)).
@@ -58,6 +61,8 @@
 :- use_module(library(jwt_io)).
 :- endif.
 
+:- listen(http(Term), http_request_logger(Term)).
+
 %%%%%%%%%%%%% API Paths %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Set base location
@@ -66,6 +71,17 @@
 :- dynamic http:location/3.
 http:location(root, '/', []).
 http:location(api, '/api', []).
+
+%%%%%%%%%%%%% Fallback Path %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+:- http_handler('/api', reply_404_not_found, [prefix]).
+
+reply_404_not_found(Request) :-
+    member(path(Path), Request),
+    format(string(Msg),'Path not found: ~w', [Path]),
+    reply_json(_{'api:status' : 'api:not_found',
+                 'api:path' : Path,
+                 'api:message' : Msg},
+               [status(404)]).
 
 %%%%%%%%%%%%%%%%%%%% Connection Handlers %%%%%%%%%%%%%%%%%%%%%%%%%
 :- http_handler(api(.), cors_handler(Method, connect_handler),
@@ -124,7 +140,7 @@ test(connection_authorised_user_http_basic, [
          cleanup(teardown_temp_server(State))
      ]) :-
     admin_pass(Key),
-    atomic_list_concat([Server, '/api'], URL),
+    atomic_list_concat([Server, '/api/'], URL),
     http_get(URL, _, [authorization(basic(admin, Key))]).
 
 
@@ -134,7 +150,7 @@ test(connection_result_dbs, [
      ])
 :-
     admin_pass(Key),
-    atomic_list_concat([Server, '/api'], URL),
+    atomic_list_concat([Server, '/api/'], URL),
     http_get(URL, Result, [json_object(dict),authorization(basic(admin, Key))]),
 
     Result = [].
@@ -157,7 +173,7 @@ message_handler(_Method, Request, _System_DB, _Auth) :-
         json_write(current_output, Message, [])
     ),
 
-    http_log('~N[Message] ~s~n',[Payload]),
+    json_log_info_formatted('~N[Message] ~s~n',[Payload]),
 
     write_cors_headers(Request),
 
@@ -207,7 +223,7 @@ db_handler(post, Organization, DB, Request, System_DB, Auth) :-
     Default_Prefixes = _{ '@base' : "terminusdb:///data/",
                           '@schema' : "terminusdb:///schema#" },
     (   _{ prefixes : Input_Prefixes } :< Database_Document
-    ->  Prefixes = (Default_Prefixes.put(Input_Prefixes))
+    ->  Prefixes = Default_Prefixes.put(Input_Prefixes)
     ;   Prefixes = Default_Prefixes),
 
     (   _{ public : Public } :< Database_Document
@@ -473,9 +489,9 @@ test(db_delete_nonexistent_errors, [
                  authorization(basic(admin, Key)),
                  status_code(Status)]),
 
-    Status = 400,
+    Status = 404,
 
-    _{'api:status' : "api:failure"} :< Result.
+    _{'api:status' : "api:not_found"} :< Result.
 
 
 test(db_auth_test, [
@@ -1641,7 +1657,7 @@ test(rebase_divergent_history, [
                     _),
 
     Second_Path = "TERMINUSQA/foo/local/branch/second",
-    branch_create(system_descriptor{}, User_ID, Second_Path, some(Master_Path), _),
+    branch_create(system_descriptor{}, User_ID, Second_Path, branch(Master_Path), _),
     resolve_absolute_string_descriptor(Second_Path, Second_Descriptor),
 
     create_context(Second_Descriptor, commit_info{author:"test",message:"commit b"}, Second_Context1),
@@ -1855,9 +1871,8 @@ auth_wrapper(Goal,Request) :-
     catch((      authenticate(System_Database, Request, Auth),
                  www_form_encode(Auth, Domain),
                  call(Goal, [domain(Domain)], Request)),
-          error(authentication_incorrect(Reason),_),
-          (   http_log("~NAuthentication Incorrect for reason: ~q~n", [Reason]),
-              reply_json(_{'@type' : 'api:ErrorResponse',
+          error(authentication_incorrect(_Reason),_),
+          (   reply_json(_{'@type' : 'api:ErrorResponse',
                            'api:status' : 'api:failure',
                            'api:error' : _{'@type' : 'api:IncorrectAuthenticationError'},
                            'api:message' : 'Incorrect authentication information'
@@ -2480,7 +2495,7 @@ test(pull_from_something_to_something_equal_other_branch,
         Store_Remote,
         (
             agent_name_uri(system_descriptor{}, "KarlKautsky", User_Uri),
-            branch_create(system_descriptor{}, User_Uri, "KarlKautsky/foo/local/branch/other", some("KarlKautsky/foo/local/branch/main"), _),
+            branch_create(system_descriptor{}, User_Uri, "KarlKautsky/foo/local/branch/other", branch("KarlKautsky/foo/local/branch/main"), _),
             repository_head(Remote_Database_Descriptor, "local", Head)
         )
     ),
@@ -2536,8 +2551,10 @@ branch_handler(post, Path, Request, System_DB, Auth) :-
         error(bad_api_document(Document, []),_)),
 
     (   get_dict(origin, Document, Origin_Path)
-    ->  Origin_Option = some(Origin_Path)
-    ;   Origin_Option = none),
+    ->  Origin_Option = branch(Origin_Path)
+    ;   ignore(get_dict(prefixes, Document, Input_Prefixes)),
+        ignore(get_dict(schema, Document, Schema)),
+        Origin_Option = empty(Input_Prefixes, Schema)),
 
     api_report_errors(
         branch,
@@ -2817,6 +2834,23 @@ user_handler(delete, Request, System_DB, Auth) :-
                             _{'@type' : "api:DeleteUserResponse",
                               'api:status' : "api:success"}))).
 
+%%%%%%%%%%%%%%%%%%%% Organization handlers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% THIS IS A *POTENTIALLY* TEMPORARY HANDLER - YOU SHOULD NOT RELY ON THIS YET
+%
+:- http_handler(api(user_organizations), cors_handler(Method, user_organizations_handler),
+                [method(Method),
+                 prefix,
+                 methods([options,get])]).
+
+user_organizations_handler(get, Request, System_DB, Auth) :-
+    api_report_errors(
+        user_organizations,
+        Request,
+        (   user_organizations(System_DB, Auth, Result),
+            cors_reply_json(Request, Result)
+        )
+    ).
 
 %%%%%%%%%%%%%%%%%%%% Organization handlers %%%%%%%%%%%%%%%%%%%%%%%%%
 :- http_handler(api(organization), cors_handler(Method, organization_handler),
@@ -3472,7 +3506,7 @@ cors_handler(Method, Goal, Options, R) :-
                   error(authentication_incorrect(Reason),_),
 
                   (   write_cors_headers(Request),
-                      http_log("~NAuthentication Incorrect for reason: ~q~n", [Reason]),
+                      json_log_error_formatted("~NAuthentication Incorrect for reason: ~q~n", [Reason]),
                       reply_json(_{'@type' : 'api:ErrorResponse',
                                    'api:status' : 'api:failure',
                                    'api:error' : _{'@type' : 'api:IncorrectAuthenticationError'},
@@ -3551,7 +3585,7 @@ customise_exception(error(E)) :-
                  'api:message' : EM},
                [status(500)]).
 customise_exception(error(E, CTX)) :-
-    http_log('~N[Exception] ~q~n',[error(E,CTX)]),
+    json_log_error_formatted('~N[Exception] ~q~n',[error(E,CTX)]),
     (   CTX = context(prolog_stack(Stack),_)
     ->  with_output_to(
             string(Ctx_String),
@@ -3564,7 +3598,7 @@ customise_exception(error(E, CTX)) :-
 customise_exception(http_reply(Obj)) :-
     throw(http_reply(Obj)).
 customise_exception(E) :-
-    http_log('~N[Exception] ~q~n',[E]),
+    json_log_error_formatted('~N[Exception] ~q~n',[E]),
     throw(E).
 
 /*
@@ -3636,17 +3670,57 @@ fetch_jwt_data(_Token, _Username) :-
 authenticate(System_Askable, Request, Auth) :-
     fetch_authorization_data(Request, Username, KS),
     !,
-    do_or_die(user_key_user_id(System_Askable, Username, KS, Auth),
-              error(authentication_incorrect(basic_auth(Username)),_)).
+
+    (   user_key_user_id(System_Askable, Username, KS, Auth)
+    ->  true
+    ;   format(string(Message), "User '~w' failed to authenticate through basic auth", Username),
+        json_log_debug(_{
+                           message: Message,
+                           authMethod: basic,
+                           authResult: failure,
+                           user: Username
+                       }),
+
+        throw(error(authentication_incorrect(basic_auth(Username)),_))),
+
+    format(string(Message), "User '~w' authenticated through basic auth", Username),
+    json_log_debug(_{
+                       message: Message,
+                       authMethod: basic,
+                       authResult: success,
+                       user: Username
+                   }).
 authenticate(System_Askable, Request, Auth) :-
     memberchk(authorization(Text), Request),
     pattern_string_split(" ", Text, ["Bearer", Token]),
     !,
     % Try JWT if no http keys
     fetch_jwt_data(Token, Username),
-    do_or_die(username_auth(System_Askable, Username, Auth),
-              error(authentication_incorrect(jwt_no_user_with_name(Username)),_)).
-authenticate(_, _, anonymous).
+    (   username_auth(System_Askable, Username, Auth)
+    ->  true
+    ;   format(string(Message), "User '~w' failed to authenticate through JWT", Username),
+        json_log_debug(_{
+                           message: Message,
+                           authMethod: jwt,
+                           authResult: failure,
+                           user: Username
+                       }),
+        throw(error(authentication_incorrect(jwt_no_user_with_name(Username)),_))),
+
+    format(string(Message), "User '~w' authenticated through JWT", Username),
+    json_log_debug(_{
+                       message: Message,
+                       authMethod: jwt,
+                       authResult: success,
+                       user: Username
+                   }).
+authenticate(_, _, anonymous) :-
+    json_log_debug(_{
+                       message: "User 'anonymous' authenticated as no authentication information was submitted",
+                       authMethod: anonymous,
+                       authResult: success,
+                       user: "anonymous"
+                   }).
 
 /*
  * write_cors_headers(Request) is det.
@@ -3703,7 +3777,6 @@ try_get_param(Key,Request,Value) :-
 
     http_parameters(Request, [], [form_data(Data)]),
 
-    http_log("request: ~q~n", [Request]),
     (   memberchk(Key=Value,Data)
     <>  throw(error(no_parameter_key_in_query_parameters(Key,Data)))),
     !.
@@ -3883,3 +3956,117 @@ collect_posted_named_files(Request,Files) :-
                  )
              ),Parts,Files).
 collect_posted_named_files(_Request,[]).
+
+
+%% Logging
+
+match_http_info(method(Method), Method_Upper, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id) :-
+    string_upper(Method, Method_Upper).
+match_http_info(protocol(Protocol), _Method, Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+match_http_info(host(Host), _Method, _Protocol, Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+match_http_info(port(Port), _Method, _Protocol, _Host, Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+match_http_info(request_uri(Url_Suffix), _Method, _Protocol, _Host, _Port, Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+match_http_info(peer(Peer), _Method, _Protocol, _Host, _Port, _Url_Suffix, Remote_Ip, _User_Agent, _Size, _Operation_Id) :-
+    % what about ipv6 though?
+    % is there any other sort of peer possible?
+    Peer = ip(N1,N2,N3,N4),
+    format(string(Remote_Ip), "~w.~w.~w.~w", [N1, N2, N3, N4]).
+match_http_info(user_agent(User_Agent), _Method, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, User_Agent, _Size, _Operation_Id).
+match_http_info(content_length(Size), _Method, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, Size_String, _Operation_Id) :-
+    term_string(Size, Size_String).
+match_http_info(x_operation_id(Operation_Id), _Method, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, Operation_Id_String) :-
+    term_string(Operation_Id, Operation_Id_String).
+match_http_info(_, _Method, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+
+extract_http_info_([], _Method, _Protocol, _Host, _Port, _Url_Suffix, _Remote_Ip, _User_Agent, _Size, _Operation_Id).
+extract_http_info_([First|Rest], Method, Protocol, Host, Port, Url_Suffix, Remote_Ip, User_Agent, Size, Operation_Id) :-
+    match_http_info(First, Method, Protocol, Host, Port, Url_Suffix, Remote_Ip, User_Agent, Size, Operation_Id),
+    !,
+    extract_http_info_(Rest, Method, Protocol, Host, Port, Url_Suffix, Remote_Ip, User_Agent, Size, Operation_Id).
+
+extract_http_info(Request, Method, Url, Path, Remote_Ip, User_Agent, Size, Operation_Id) :-
+    extract_http_info_(Request, Method, Protocol, Host, Port, Path, Remote_Ip, User_Agent, Size, Operation_Id),
+
+    (   var(Port)
+    ->  format(string(Url), "~w://~w~w", [Protocol, Host, Path])
+    ;   format(string(Url), "~w://~w:~w~w", [Protocol, Host, Port, Path])).
+
+
+get_current_id_from_stream(Id) :-
+    current_output(CGI),
+    cgi_property(CGI, id(Id)).
+
+save_request(Request) :-
+    get_time(Now),
+    get_current_id_from_stream(Id),
+    extract_http_info(Request, Method, Url, Path, Remote_Ip, User_Agent, Size, Submitted_Operation_Id),
+    (   var(Submitted_Operation_Id)
+    ->  Operation_Id = none
+    ;   Operation_Id = some(Submitted_Operation_Id)),
+
+    include([_-V]>>(nonvar(V)), [requestMethod-Method,
+                                 requestUrl-Url,
+                                 requestSize-Size,
+                                 remoteIp-Remote_Ip,
+                                 userAgent-User_Agent
+                                ],
+           Http_Pairs),
+    assert(saved_request(Id, Now, Path, Operation_Id, Http_Pairs)).
+
+:- multifile http:request_expansion/2.
+http:request_expansion(Request, Request) :-
+    save_request(Request).
+
+http_request_logger(_) :-
+    % Skip work if info log is not enabled
+    \+ info_log_enabled,
+    !,
+    true.
+http_request_logger(request_start(Local_Id, Request)) :-
+    extract_http_info(Request, Method, _Url, Path, _Remote_Ip, _User_Agent, _Size, Submitted_Operation_Id),
+    generate_request_id(Local_Id, Request_Id),
+
+    (   var(Submitted_Operation_Id)
+    ->  Operation_Id = first(Request_Id)
+    ;   Operation_Id = Submitted_Operation_Id),
+
+    format(string(Message), "Request ~w started - ~w ~w", [Request_Id, Method, Path]),
+
+    include([_-V]>>(nonvar(V)), [method-Method,
+                                 path-Path,
+                                 message-Message
+                                ],
+            Dict_Pairs),
+    dict_create(Dict, json, Dict_Pairs),
+    json_log_debug(Operation_Id,
+                  Request_Id,
+                   Dict).
+
+http_request_logger(request_finished(Local_Id, Code, _Status, _Cpu, Bytes)) :-
+    term_string(Bytes, Bytes_String),
+
+    saved_request(Local_Id, Start, Path, Submitted_Operation_Id, Initial_Http_Pairs),
+    retract(saved_request(Local_Id, Start, Path, Submitted_Operation_Id, Initial_Http_Pairs)),
+    get_time(Now),
+    Latency is Now - Start,
+    format(string(Latency_String), "~9fs", [Latency]),
+    Http_Pairs = [
+        status-Code,
+        responseSize-Bytes_String,
+        latency-Latency_String
+        |Initial_Http_Pairs],
+
+    dict_create(Http, json, Http_Pairs),
+
+    generate_request_id(Local_Id, Request_Id),
+    (   Submitted_Operation_Id = some(Operation_Id)
+    ->  true
+    ;   Operation_Id = last(Request_Id)),
+
+    format(string(Message), "~w ~w (~w)", [Http.requestMethod, Path, Code]),
+    json_log_info(Operation_Id,
+                  Request_Id,
+                  json{
+                      httpRequest: Http,
+                      message: Message
+                  }).

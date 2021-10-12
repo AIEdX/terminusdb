@@ -11,7 +11,7 @@ TerminusDB is an open source knowledge graph and document store. Use it to build
 
 TerminusX is a cloud self-service data platform built on TerminusDB. Use it to collaborate with colleagues to quickly build a vibrant ecosystem of domain data products. TerminusX is in **public beta** and you can [signup now](https://dashboard.terminusdb.com/).
 
-TerminusDB provides a [document API](https://github.com/terminusdb/terminusdb-docs/blob/beta/reference/DOCUMENT.md) for building via the JSON exchange format. The convienience of documents with the power of a knowledge graph.
+TerminusDB provides a [document API](https://github.com/terminusdb/terminusdb-docs/blob/beta/reference/DOCUMENT.md) for building via the JSON exchange format. The convenience of documents with the power of a knowledge graph.
 
 
 
@@ -25,8 +25,8 @@ If you want to build: a knowledge graph of interconnected data products; data-in
 
 ## Quick Links
 
-| [Quick Start](https://docs.terminusdb.com/v10.0/#/terminusx/quick-start-overview)     | [TerminusDB Documentation](https://docs.terminusdb.com/v10.0/#/)       | [Python Client](https://github.com/terminusdb/terminusdb-client-python)         | [JavaScript Client](https://github.com/terminusdb/terminusdb-client-js) |
-| :--- | :--- | :--- | :--- |
+| [Quick Start](https://docs.terminusdb.com/v10.0/#/terminusx/quick-start-overview)     | [Bootstrap TerminusDB](https://github.com/terminusdb/terminusdb-bootstrap)       | [TerminusX Beta Docs](https://docs.terminusdb.com/#/)       |  [TerminusDB 10.0 Dev Docs](https://docs.terminusdb.com/next/#/)         | [Python Client](https://github.com/terminusdb/terminusdb-client-python)         | [JavaScript Client](https://github.com/terminusdb/terminusdb-client-js) | 
+| :--- | :--- | :--- | :--- | :--- | :--- |
 
 <br/><br/>
 
