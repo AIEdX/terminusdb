@@ -1142,6 +1142,14 @@ api_document_error_jsonld(Type, error(syntax_error(json(What)), _), JSON) :-
              'api:message' : Msg,
              'api:what': What
             }.
+api_document_error_jsonld(Type, error(missing_type_field(Document), _), JSON) :-
+    document_error_type(Type, JSON_Type),
+    format(string(Msg), "Submitted document missing @type field.", []),
+    JSON = _{'@type' : JSON_Type,
+             'api:status' : 'api:failure',
+             'api:error' : _{ '@type' : 'api:MissingTypeField',
+                              'api:document' : Document},
+             'api:message' : Msg}.
 api_document_error_jsonld(Type, error(type_not_found(Document_Type, Document), _), JSON) :-
     document_error_type(Type, JSON_Type),
     format(string(Msg), "Type in submitted document not found in the schema: ~q", [Document_Type]),
@@ -1150,6 +1158,16 @@ api_document_error_jsonld(Type, error(type_not_found(Document_Type, Document), _
              'api:error' : _{ '@type' : 'api:TypeNotFound',
                               'api:type' : Document_Type,
                               'api:document' : Document},
+             'api:message' : Msg
+            }.
+api_document_error_jsonld(Type, error(unexpected_array_value(Value, Expected_Type),_),JSON) :-
+    document_error_type(Type, JSON_Type),
+    format(string(Msg), "Unexpected array value: ~q, expected type: ~q", [Value, Expected_Type]),
+    JSON = _{'@type' : JSON_Type,
+             'api:status' : "api:failure",
+             'api:error' : _{ '@type' : 'api:UnexpectedArrayValue',
+                              'api:value' : Value,
+                              'api:expected_type' : Expected_Type },
              'api:message' : Msg
             }.
 api_document_error_jsonld(Type, error(schema_check_failure(Witnesses),_),JSON) :-
@@ -1323,7 +1341,7 @@ api_document_error_jsonld(get_documents,error(query_error(unknown_type(Type)),_)
     format(string(Msg), "Query has an unknown type ~q", [Type]),
     JSON = _{'@type' : 'api:GetDocumentErrorResponse',
              'api:status' : 'api:failure',
-             'api:error' : _{ '@type' : 'api:QueryUnkonwnType'},
+             'api:error' : _{ '@type' : 'api:QueryUnknownType'},
              'api:message' : Msg
             }.
 api_document_error_jsonld(get_documents,error(query_error(not_a_query_document_list(Documents)),_), JSON) :-

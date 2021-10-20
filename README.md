@@ -11,7 +11,7 @@ TerminusDB is an open source knowledge graph and document store. Use it to build
 
 TerminusX is a cloud self-service data platform built on TerminusDB. Use it to collaborate with colleagues to quickly build a vibrant ecosystem of domain data products. TerminusX is in **public beta** and you can [signup now](https://dashboard.terminusdb.com/).
 
-TerminusDB provides a [document API](https://github.com/terminusdb/terminusdb-docs/blob/beta/reference/DOCUMENT.md) for building via the JSON exchange format. The convenience of documents with the power of a knowledge graph.
+TerminusDB provides a [document API](https://docs.terminusdb.com/v10.0/#/reference/reference-document-interface) for building via the JSON exchange format. The convenience of documents with the power of a knowledge graph.
 
 
 
@@ -54,7 +54,7 @@ TerminusDB is a lightweight, high-speed immutable database. Our [delta-encoding]
 
 ## Community
 
-Come visit us on our [discord server](https://discord.gg/yTJKAma)
+Come visit us [Discord](https://discord.gg/yTJKAma)
 or our [forum](https://discuss.terminusdb.com). We are also on [twitter](https://twitter.com/TerminusDB)
 <img align="right" src="https://assets.terminusdb.com/images/TerminusDB%20color%20mascot.png" width="256px"/>
 
