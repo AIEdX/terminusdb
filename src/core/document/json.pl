@@ -80,8 +80,7 @@ value_type_to_json_type(X, T, X, T) :-
     number(X),
     !.
 value_type_to_json_type(X, T, S, T) :-
-    (   string(X)
-    ;   atom(X)),
+    string(X),
     !,
     atom_string(X, S).
 value_type_to_json_type(X, T, X, T) :-
@@ -94,8 +93,11 @@ json_type_to_value_type(J, T, J, T) :-
     number(J),
     !.
 json_type_to_value_type(J, T, J, T) :-
-    T = 'http://www.w3.org/2001/XMLSchema#boolean',
-    !.
+    memberchk(J, [false, true]),
+    !,
+    do_or_die(
+        T = 'http://www.w3.org/2001/XMLSchema#boolean',
+        error(unexpected_boolean_value(J, T), _)).
 json_type_to_value_type(J, T, X, T) :-
     typecast(J^^'http://www.w3.org/2001/XMLSchema#string', T, [], X^^_).
 
@@ -424,13 +426,11 @@ database_context_object(Askable,Context) :-
     create_context(Askable, Query_Context),
     database_context_object(Query_Context, Context).
 
-database_prefixes(DB,Context) :-
-    is_transaction(DB),
-    !,
-    database_schema(DB,Schema),
+:- table database_schema_prefixes/2 as private.
+database_schema_prefixes(Schema,Context) :-
     once(
         (   xrdf(Schema, ID, rdf:type, sys:'Context')
-        ->  id_schema_json(DB,ID,Pre_Context),
+        ->  id_schema_json(Schema,ID,Pre_Context),
             findall(
                 Key-URI,
                 (   xrdf(Schema, ID, sys:prefix_pair, Prefix_Pair),
@@ -445,6 +445,13 @@ database_prefixes(DB,Context) :-
             select_dict(json{'@id' : _ }, Context_With_ID, Context)
         ;   Context = _{})
     ).
+
+database_prefixes(DB,Context) :-
+    (   is_transaction(DB)
+    ;   is_validation_object(DB)),
+    !,
+    database_schema(DB,Schema),
+    database_schema_prefixes(Schema,Context).
 database_prefixes(Query_Context, Context) :-
     is_query_context(Query_Context),
     !,
@@ -927,11 +934,7 @@ json_schema_elaborate_key(V,Context,Value) :-
     ),
     !,
     (   get_dict('@fields', V, Fields)
-    ->  maplist({Context}/[Elt,Elt_ID]>>(
-                    prefix_expand_schema(Elt,Context,Elt_Ex),
-                    wrap_id(Elt_Ex,Elt_ID)
-                ),
-                Fields, Fields_Wrapped),
+    ->  json_schema_elaborate_key_fields(Context, Fields, Fields_Wrapped),
         global_prefix_expand(sys:fields,Field),
         Type_Value = json{ '@type' : Type },
         Value = (Type_Value.put(Field,
@@ -940,7 +943,7 @@ json_schema_elaborate_key(V,Context,Value) :-
                                     '@type' : "@id",
                                     '@value' : Fields_Wrapped
                                 }))
-    ;   throw(error(key_missing_fields(V,Type),_))
+    ;   throw(error(key_missing_fields(Candidate),_))
     ).
 json_schema_elaborate_key(V,_,json{ '@type' : Type}) :-
     get_dict('@type', V, ValueHash),
@@ -957,6 +960,20 @@ json_schema_elaborate_key(V,_,_) :-
 json_schema_elaborate_key(V,_,_) :-
     atom_json_dict(Atom, V, []),
     throw(error(document_key_type_missing(Atom), _)).
+
+json_schema_elaborate_key_fields(_, Fields, _) :-
+    \+ is_list(Fields),
+    !,
+    throw(error(key_fields_not_an_array(Fields), _)).
+json_schema_elaborate_key_fields(_, [], _) :-
+    throw(error(key_fields_is_empty, _)).
+json_schema_elaborate_key_fields(Context, Fields, Fields_Wrapped) :-
+    maplist(
+        {Context}/[Elt, Elt_ID]>>(
+            prefix_expand_schema(Elt, Context, Elt_Ex),
+            wrap_id(Elt_Ex,Elt_ID)),
+        Fields,
+        Fields_Wrapped).
 
 json_schema_elaborate_property_documentation(Context, Path, Dict, Out) :-
     global_prefix_expand(sys:'PropertyDocumentation',Property_Ex),
@@ -1590,9 +1607,8 @@ schema_subject_predicate_object_key_value(_,_,_Id,P,O^^_,'@base',O) :-
 schema_subject_predicate_object_key_value(_,_,_Id,P,_,'@subdocument',[]) :-
     global_prefix_expand(sys:subdocument,P),
     !.
-schema_subject_predicate_object_key_value(DB,Prefixes,Id,P,_,'@inherits',V) :-
+schema_subject_predicate_object_key_value(Schema,Prefixes,Id,P,_,'@inherits',V) :-
     global_prefix_expand(sys:inherits,P),
-    database_schema(DB,Schema),
     findall(Parent,
             (   xrdf(Schema, Id, sys:inherits, O),
                 compress_schema_uri(O, Prefixes, Parent)
@@ -1611,27 +1627,26 @@ schema_subject_predicate_object_key_value(_,_,_Id,P,_,'@abstract',[]) :-
 schema_subject_predicate_object_key_value(_,_,_Id,P,O,'@class',O) :-
     global_prefix_expand(sys:class,P),
     !.
-schema_subject_predicate_object_key_value(DB,_,Id,P,O,'@value',Enum_List) :-
+schema_subject_predicate_object_key_value(Schema,_,Id,P,O,'@value',Enum_List) :-
     global_prefix_expand(sys:value,P),
     !,
-    database_schema(DB,Schema),
     rdf_list_list(Schema, O, L),
     maplist({Id}/[V,Enum]>>(
                 enum_value(Id,Enum,V)
             ), L, Enum_List).
-schema_subject_predicate_object_key_value(DB,Prefixes,Id,P,_,'@key',V) :-
+schema_subject_predicate_object_key_value(Schema,Prefixes,Id,P,_,'@key',V) :-
     global_prefix_expand(sys:key,P),
     !,
-    key_descriptor(DB, Prefixes, Id, Key),
+    schema_key_descriptor(Schema, Prefixes, Id, Key),
     key_descriptor_json(Key,Prefixes,V).
-schema_subject_predicate_object_key_value(DB,Prefixes,Id,P,_,'@documentation',V) :-
+schema_subject_predicate_object_key_value(Schema,Prefixes,Id,P,_,'@documentation',V) :-
     global_prefix_expand(sys:documentation,P),
     !,
-    documentation_descriptor(DB, Id, Documentation_Desc),
+    schema_documentation_descriptor(Schema, Id, Documentation_Desc),
     documentation_descriptor_json(Documentation_Desc,Prefixes,V).
-schema_subject_predicate_object_key_value(DB,Prefixes,_Id,P,O,K,JSON) :-
+schema_subject_predicate_object_key_value(Schema,Prefixes,_Id,P,O,K,JSON) :-
     compress_schema_uri(P, Prefixes, K),
-    type_descriptor(DB, O, Descriptor),
+    schema_type_descriptor(Schema, O, Descriptor),
     type_descriptor_json(Descriptor,Prefixes,JSON).
 
 get_schema_document_uri(Query_Context, ID) :-
@@ -1657,7 +1672,8 @@ get_schema_document(DB, Id, Document) :-
     database_prefixes(DB, DB_Prefixes),
     default_prefixes(Defaults),
     Prefixes = (Defaults.put(DB_Prefixes)),
-    id_schema_json(DB, Prefixes, Id, Document).
+    database_schema(DB,Schema),
+    id_schema_json(Schema, Prefixes, Id, Document).
 
 get_schema_document_uri_by_type(DB, Type, Uri) :-
     default_prefixes(Prefixes),
@@ -1678,14 +1694,13 @@ get_schema_document_by_type(DB, Type, Document) :-
     ),
 
     xrdf(Schema, Id_Ex, rdf:type, Type_Ex),
-    id_schema_json(DB, Prefixes, Id_Ex, Document).
+    id_schema_json(Schema, Prefixes, Id_Ex, Document).
 
-id_schema_json(DB, Id, JSON) :-
+id_schema_json(Schema, Id, JSON) :-
     default_prefixes(Defaults),
-    id_schema_json(DB, Defaults, Id, JSON).
+    id_schema_json(Schema, Defaults, Id, JSON).
 
-id_schema_json(DB, Prefixes, Id, JSON) :-
-    database_schema(DB,Schema),
+id_schema_json(Schema, Prefixes, Id, JSON) :-
     (   ground(Id)
     ->  prefix_expand_schema(Id, Prefixes, Id_Ex)
     ;   Id = Id_Ex
@@ -1696,7 +1711,7 @@ id_schema_json(DB, Prefixes, Id, JSON) :-
     findall(
         K-V,
         (   distinct([P],xrdf(Schema,Id_Ex,P,O)),
-            schema_subject_predicate_object_key_value(DB,Prefixes,Id_Ex,P,O,K,V)
+            schema_subject_predicate_object_key_value(Schema,Prefixes,Id_Ex,P,O,K,V)
         ),
         Data),
     !,
@@ -1862,8 +1877,7 @@ json_to_database_type(D^^T, _) :-
     !,
     throw(error(unexpected_array_value(D,T),_)).
 json_to_database_type(D^^T, OC) :-
-    (   string(D)
-    ;   atom(D)),
+    string(D),
     !,
     typecast(D^^'http://www.w3.org/2001/XMLSchema#string', T, [], OC).
 json_to_database_type(D^^T, OC) :-
@@ -1895,7 +1909,7 @@ delete_subdocument(DB, Prefixes, V) :-
         )
     ;   true).
 
-delete_document(DB, Prefixes, Id) :-
+delete_document(DB, Prefixes, Unlink, Id) :-
     database_instance(DB,Instance),
     prefix_expand(Id,Prefixes,Id_Ex),
     (   xrdf(Instance, Id_Ex, rdf:type, _)
@@ -1908,18 +1922,23 @@ delete_document(DB, Prefixes, Id) :-
             delete_subdocument(DB,Prefixes,V)
         )
     ),
-    unlink_object(Instance, Id_Ex).
+    (   Unlink = true
+    ->  unlink_object(Instance, Id_Ex)
+    ;   true).
 
-delete_document(DB, Id) :-
+delete_document(DB, Unlink, Id) :-
     is_transaction(DB),
     !,
     database_prefixes(DB,Prefixes),
-    delete_document(DB, Prefixes, Id).
-delete_document(Query_Context, Id) :-
+    delete_document(DB, Prefixes, Unlink, Id).
+delete_document(Query_Context, Unlink, Id) :-
     is_query_context(Query_Context),
     !,
     query_default_collection(Query_Context, TO),
-    delete_document(TO, Id).
+    delete_document(TO, Unlink, Id).
+
+delete_document(DB, Id) :-
+    delete_document(DB, true, Id).
 
 nuke_documents(Transaction) :-
     is_transaction(Transaction),
@@ -2007,7 +2026,7 @@ replace_document(Transaction, Document, Id) :-
     !,
     json_elaborate(Transaction, Document, Elaborated),
     get_dict('@id', Elaborated, Id),
-    catch(delete_document(Transaction, Id),
+    catch(delete_document(Transaction, false, Id),
           error(document_does_not_exist(_),_),
           throw(error(document_does_not_exist(Id, Document),_))),
     insert_document_expanded(Transaction, Elaborated, Id).
@@ -2245,22 +2264,25 @@ delete_schema_subdocument(Transaction, Context, Id) :-
     database_schema(Transaction, [Schema]),
     (   atom(Id)
     ->  (   xrdf([Schema], Id, rdf:type, C),
-            (   (   is_system_class(C)
-                ;   is_key(C)
-                ;   is_documentation(C)
-                )
-            ->  xrdf([Schema], Id, P, R),
-                \+ global_prefix_expand(rdf:type, P),
-                delete(Schema, Id, P, R, _),
-                delete_schema_subdocument(Transaction, Context, R)
-            ;   is_list_type(C)
+            (   is_list_type(C)
             ->  delete_schema_list(Transaction,Context,Id)
+            ;   (   is_key(C)
+                ;   is_documentation(C)
+                ;   type_family_constructor(C)
+                )
+            ->  forall(
+                    xrdf([Schema], Id, P, R),
+                    (   delete(Schema, Id, P, R, _),
+                        delete_schema_subdocument(Transaction, Context, R))
+                )
             ;   true
             )
         % Enum
         % NOTE: This should probably have an ENUM type field.
-        ;   true)
-    ;   true).
+        ;   true
+        )
+    ;   true
+    ).
 
 % NOTE: This leaves garbage! We need a way to collect the leaves which
 % link to array elements or lists.
@@ -5668,6 +5690,214 @@ test(status_update,
            )
     ).
 
+
+test(status_update,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 create_db_with_empty_schema("admin", "foo"),
+                 resolve_absolute_string_descriptor("admin/foo", Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         )
+     ]) :-
+
+
+     Schema_Atom = '[{
+        "@id": "User",
+        "@inherits": "Entity",
+        "@key": {
+            "@fields": [
+                "user_id"
+            ],
+            "@type": "Lexical"
+        },
+        "@type": "Class",
+        "api_key": {
+            "@class": "APIKey",
+            "@type": "Set"
+        },
+        "company": "xsd:string",
+        "email": "xsd:string",
+        "first_name": "xsd:string",
+        "last_name": "xsd:string",
+        "picture": "xsd:string",
+        "registration_date": {
+            "@class": "xsd:dateTime",
+            "@type": "Optional"
+        },
+        "user_id": "xsd:string"
+    },
+    {
+        "@abstract": [],
+        "@id": "Entity",
+        "@type": "Class",
+        "status": "Status"
+    },
+    {
+        "@id": "Status",
+        "@type": "Enum",
+        "@value": [
+            "pending",
+            "inactive",
+            "active",
+            "needs_invite",
+            "invite_sent",
+            "accepted",
+            "rejected"
+        ]
+    },
+    {
+        "@id": "Invitation",
+        "@inherits": "Entity",
+        "@key": {
+            "@fields": [
+                "invited_by",
+                "email_to",
+                "creation_date"],
+            "@type": "Hash"
+        },
+        "@subdocument": [],
+        "@type": "Class",
+        "email_to": "xsd:string",
+        "invited_by": "User",
+        "note": {
+            "@class": "xsd:string",
+            "@type": "Optional"
+        },
+        "role": {
+            "@class": "xsd:string",
+            "@type": "Optional"
+        },
+        "creation_date":"xsd:dateTime"
+    }]',
+
+     atom_json_dict(Schema_Atom, Docs, []),
+
+     with_test_transaction(
+         Desc,
+         C1,
+         forall(member(Doc, Docs),
+                insert_schema_document(
+                    C1,
+                    Doc))
+     ),
+
+     User_Atom = '{
+        "@type": "User",
+        "company": "orgTest",
+        "email": "collaborator@gmail.com",
+        "first_name": "collaborator",
+        "last_name": "collaborator",
+        "picture": "https://s.gravatar.com/avatar/5d4d9906d3b46bdcaad9221ce335b754?s=480&r=pg&d=https%3A%2F%2Fcdn.auth0.com%2Favatars%2Fco.png",
+        "status": "active",
+        "user_id": "auth0|615462f8ab33f4006a6bee0c"
+    }',
+     atom_json_dict(User_Atom, User, []),
+
+     with_test_transaction(
+         Desc,
+         C2,
+         insert_document(
+             C2,
+             User,
+             _User_Uri)
+     ),
+
+     Invitation_Atom = '{
+        "@id": "Invitation",
+        "@inherits": "Entity",
+        "@key": {
+            "@fields": [
+                "invited_by",
+                "email_to",
+                "creation_date"],
+            "@type": "Hash"
+        },
+        "@subdocument": [],
+        "@type": "Class",
+        "email_to": "xsd:string",
+        "invited_by": "User",
+        "note": {
+            "@class": "xsd:string",
+            "@type": "Optional"
+        },
+        "role": {
+            "@class": "xsd:string",
+            "@type": "Optional"
+        },
+        "creation_date":"xsd:dateTime"
+    }',
+     atom_json_dict(Invitation_Atom, Invitation, []),
+
+     with_test_transaction(
+         Desc,
+         C3,
+         delete_schema_document(C3, "Invitation")
+     ),
+     % print_all_triples(Desc, schema),
+     with_test_transaction(
+         Desc,
+         C4,
+         insert_schema_document(C4, Invitation)
+     ),
+
+     with_test_transaction(
+         Desc,
+         C5,
+         replace_schema_document(C5, Invitation)
+     ).
+
+test(property_documentation_mismatch,
+     [
+         setup(
+             (   setup_temp_store(State),
+                 create_db_with_empty_schema("admin", "foo"),
+                 resolve_absolute_string_descriptor("admin/foo", Desc)
+             )),
+         cleanup(
+             teardown_temp_store(State)
+         ),
+         error(schema_check_failure([witness{'@type':invalid_property_in_property_documentation_object,class:'http://somewhere.for.now/schema#User',predicate:'http://somewhere.for.now/schema#times',subject:'http://somewhere.for.now/schema#User/documentation/Documentation/properties/times'}]), _)
+     ]) :-
+
+    Schema_Atom = '{
+        "@id": "User",
+        "@documentation" : {
+        "@comment" : "A user",
+        "@properties" : { "times" : "Wrong documentation." }
+  },
+        "@key": {
+            "@fields": [
+                "user_id"
+            ],
+            "@type": "Lexical"
+        },
+        "@type": "Class",
+        "company": "xsd:string",
+        "email": "xsd:string",
+        "first_name": "xsd:string",
+        "last_name": "xsd:string",
+        "picture": "xsd:string",
+        "registration_date": {
+            "@class": "xsd:dateTime",
+            "@type": "Optional"
+        },
+        "user_id": "xsd:string"
+    }',
+
+    atom_json_dict(Schema_Atom, Doc, []),
+
+     with_test_transaction(
+         Desc,
+         C1,
+         insert_schema_document(
+                    C1,
+                    Doc)
+     ).
+
+
 :- end_tests(json).
 
 :- begin_tests(schema_checker).
@@ -7376,29 +7606,6 @@ test(lexical_timestamp,
     ) :-
 
     write_schema(schema8_1,Desc).
-
-
-schema8_2('
-{"@base": "terminusdb:///data/", "@schema": "terminusdb:///schema#", "@type": "@context"}
-{"@type": "Class", "@id": "Grades", "last_name": "xsd:string", "first_name": "xsd:string", "ssn": "xsd:string", "test1": "xsd:decimal", "test2": "xsd:decimal", "test3": "xsd:decimal", "test4": "xsd:decimal", "final": "xsd:decimal", "grade": "xsd:string", "@key": {"@type": "Hash", "@field": ["last_name", "first_name", "ssn", "test1", "test2", "test3", "test4", "final", "grade"]}}
-').
-
-test(round_trip_hash_key,
-     [setup(
-          (   setup_temp_store(State),
-              test_document_label_descriptor(Desc)
-          )),
-      cleanup(
-          teardown_temp_store(State)
-      ),
-      error(key_missing_fields(json{'@field':["last_name","first_name","ssn","test1","test2","test3","test4","final","grade"],'@type':"Hash"},'http://terminusdb.com/schema/sys#Hash'),_)
-     ]
-    ) :-
-
-    write_schema(schema8_2,Desc),
-    print_all_triples(Desc,schema),
-    open_descriptor(Desc, DB),
-    get_schema_document(DB, 'Grades', _JSON).
 
 test(key_exchange_problem,
      [

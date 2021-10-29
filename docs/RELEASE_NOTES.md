@@ -1,3 +1,25 @@
+# TerminusDB Server v10.0.9 Beta Release Notes
+## Bug fixes
++ References to documents were dropped on document replacement
++ booleans handled incorrectly in document interface
+
+## Enhancements
++ Improvements to error reporting
++ Speed improvements to schema checking
+
+# TerminusDB Server v10.0.8 Beta Release Notes
+## New
++ Performance enhancements to document interface
++ Better transaction retry back-off parameters
++ New integration tests to improve correctness checking in CI
+
+## Bug fixes
++ Schema document deletion bug fixed
++ Better error handling
++ More complete handling of JSON-LD format
++ Fixed WOQL IsA handling
++ Fixed behaviour of some WOQL update words
+
 # TerminusDB Server v10.0.7 Beta Release Notes
 ## Bug fixes
 + Enum triples were not properly type-checked
