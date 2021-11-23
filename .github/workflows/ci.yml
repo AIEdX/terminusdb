@@ -4,6 +4,10 @@ on:
   push:
     branches:
     tags:
+    paths-ignore:
+      - 'docs/**'
+      - LICENSE
+      - README.md
   pull_request:
     # Don't run if only the docs are changed.
     paths-ignore:
@@ -13,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  TERMINUSDB_STORE_PROLOG_VERSION: v0.19.3
+  TERMINUSDB_STORE_PROLOG_VERSION: v0.19.4
   TUS_VERSION: v0.0.5
   DOCKER_IMAGE_NAME: terminusdb/terminusdb-server
 

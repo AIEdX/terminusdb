@@ -1,3 +1,36 @@
+# TerminusDB Server v10.0.12 Beta Release Notes
+## Bug fixes
++ Query parameter is ignored.
++ Type parameter is ignored for queries.
++ Subsumption check between specified type and match document type is reversed.
+
+# TerminusDB Server v10.0.11 Beta Release Notes
+## New
++ `@oneOf` property in type definitions for disjoint properties as a
+  generalization of tagged unions.
+
+## Bug fixes
++ Cardinality bug fixes.
++ More robust request parameter checking.
+
+## Enhancements
++ Frame generation can now generate frames for all classes at once.
++ Speed improvements in schema checking.
++ Tagged unions can now be inherited.
+
+# TerminusDB Server v10.0.10 Beta Release Notes
+
+## Bug fixes
++ Improved handling of '@id' and '@type' for strange, non string
+  values.
+
+## Enhancements
++ Optimizations to improvement performance of the document interface.
++ Document paths now include an "any-forward" and "any-backward" by
+  omiting the predicate from the 'PathPredicate' or 'InversePathPredicate'
++ Insert or Update functionality added to the document interface.
+  which allows updating or inserting.
+
 # TerminusDB Server v10.0.9 Beta Release Notes
 ## Bug fixes
 + References to documents were dropped on document replacement
