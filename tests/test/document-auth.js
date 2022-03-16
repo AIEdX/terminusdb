@@ -24,6 +24,14 @@ describe('document', function () {
       await db.del(agent, dbPath)
     })
 
+    it('succeeds on database exists', async function () {
+      const r = await agent
+        .head(dbPath)
+        .query({ exists: true })
+      expect(r.status).to.equal(200)
+      expect(r.text).to.be.undefined
+    })
+
     describe('fails insert with missing parameters', function () {
       const options = [
         [{ queryString: '', bodyString: '' }, 'author'],
@@ -52,6 +60,17 @@ describe('document', function () {
           document.expectMissingParameter(r, missingParam)
         })
       }
+    })
+
+    it('fails replace for document not found', async function () {
+      const instance = { '@id': util.randomString() }
+      const r = await document
+        .replace(agent, docPath, { instance })
+        .then(document.verifyReplaceNotFound)
+      console.error(r.body)
+      expect(r.body['api:error']['@type']).to.equal('api:DocumentNotFound')
+      expect(r.body['api:error']['api:document_id']).to.equal('terminusdb:///data/' + instance['@id'])
+      expect(r.body['api:error']['api:document']).to.deep.equal(instance)
     })
 
     describe('fails on bad schema @id (#647)', function () {
@@ -120,7 +139,7 @@ describe('document', function () {
       }
     })
 
-    describe('handles strange schema @id', function () {
+    describe('inserts, queries, and deletes schema with @id', function () {
       const keys = [
         'false',
         'true',
@@ -129,6 +148,7 @@ describe('document', function () {
         '[]',
         '{}',
         '/',
+        '逆手道',
       ]
       for (const id of keys) {
         it(id, async function () {
@@ -328,6 +348,30 @@ describe('document', function () {
       }
     })
 
+    it('fails for wrong array dimension (#975)', async function () {
+      const type = util.randomString()
+      await document
+        .insert(agent, docPath, {
+          schema: {
+            '@id': type,
+            '@type': 'Class',
+            s: {
+              '@type': 'Array',
+              '@dimensions': 1,
+              '@class': 'xsd:integer',
+            },
+          },
+        })
+        .then(document.verifyInsertSuccess)
+      const r = await document
+        .insert(agent, docPath, {
+          instance: { '@type': type, s: [[1], [2]] },
+        })
+        .then(document.verifyInsertFailure)
+      expect(r.body['api:error']['@type']).to.equal('api:DocumentArrayWrongDimensions')
+      expect(r.body['api:error']['api:dimensions']).to.equal(1)
+    })
+
     it('does not stringify boolean literals (#723)', async function () {
       const type = util.randomString()
       const id = type + '/' + util.randomString()
@@ -382,7 +426,7 @@ describe('document', function () {
         .then(document.verifyInsertSuccess)
       await document
         .replace(agent, docPath, { instance: doc1 })
-        .then(document.verifyInsertSuccess)
+        .then(document.verifyReplaceSuccess)
       const r = await document
         .get(agent, docPath, { body: { id: doc2['@id'] } })
         .then(document.verifyGetSuccess)
@@ -415,7 +459,7 @@ describe('document', function () {
           ],
           create: true,
         })
-        .then(document.verifyInsertSuccess)
+        .then(document.verifyReplaceSuccess)
       const r = await document
         .get(agent, docPath, { query: { type: type1 } })
         .then(document.verifyGetSuccess)
@@ -463,27 +507,47 @@ describe('document', function () {
       }
     })
 
-    it('fails when adding non-optional field to schema (#780)', async function () {
-      // Insert an initial schema.
-      const schema = { '@id': util.randomString(), '@type': 'Class' }
+    it('succeeds when ignoring optional combined with oneof (#992)', async function () {
+      const Parent = util.randomString()
+      const Choice = util.randomString()
+      const Container = util.randomString()
+      const schema = [
+        {
+          '@type': 'Class',
+          '@id': Parent,
+          optional: { '@type': 'Optional', '@class': 'xsd:integer' },
+        },
+        {
+          '@type': 'TaggedUnion',
+          '@id': Choice,
+          '@key': { '@type': 'ValueHash' },
+          '@inherits': [Parent],
+          '@subdocument': [],
+          integer: 'xsd:integer',
+          boolean: 'xsd:boolean',
+        },
+        {
+          '@type': 'Class',
+          '@id': Container,
+          contains: { '@type': 'Set', '@class': Parent },
+        },
+      ]
       await document
         .insert(agent, docPath, { schema: schema })
         .then(document.verifyInsertSuccess)
-      // Insert an initial instance.
-      const instance = { '@type': schema['@id'] }
+
+      const instance = {
+        '@type': Container,
+        contains: [
+          {
+            '@type': Choice,
+            integer: 12,
+          },
+        ],
+      }
       await document
         .insert(agent, docPath, { instance: instance })
         .then(document.verifyInsertSuccess)
-      // Update the schema with a new field that is not Optional.
-      schema.name = 'xsd:string'
-      const r = await document
-        .replace(agent, docPath, { schema: schema })
-        .then(document.verifyReplaceFailure)
-      expect(r.body['api:error']['@type']).to.equal('api:SchemaCheckFailure')
-      expect(r.body['api:error']['api:witnesses']).to.be.an('array').that.has.lengthOf(1)
-      expect(r.body['api:error']['api:witnesses'][0]['@type']).to.equal('instance_not_cardinality_one')
-      expect(r.body['api:error']['api:witnesses'][0].class).to.equal('http://www.w3.org/2001/XMLSchema#string')
-      expect(r.body['api:error']['api:witnesses'][0].predicate).to.equal('terminusdb:///schema#name')
     })
 
     it('accepts & returns subdocument schema with @documentation (#670)', async function () {

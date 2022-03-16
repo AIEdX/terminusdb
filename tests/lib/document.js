@@ -12,6 +12,7 @@ function commonGetParams (params) {
   result.id = params.string('id')
   result.count = params.integer('count')
   result.skip = params.integer('skip')
+  result.compress_ids = params.boolean('compress_ids')
   result.prefixed = params.boolean('prefixed')
   params.assertEmpty()
   return result
@@ -22,8 +23,16 @@ function get (agent, path, params) {
   const queryString = params.string('queryString')
   const query = commonGetParams(new Params(params.object('query')))
   const bodyString = params.string('bodyString')
-  const body = commonGetParams(new Params(params.object('body')))
+  const bodyParams = new Params(params.object('body'))
+  const docQuery = bodyParams.object('query')
+  const body = commonGetParams(bodyParams)
   params.assertEmpty()
+
+  // This is not a parameter common to both the query string and body, so we add
+  // it back in.
+  if (docQuery) {
+    body.query = docQuery
+  }
 
   const request = agent.get(path)
   if (queryString) {
@@ -129,16 +138,19 @@ function del (agent, path, params) {
   query.id = queryParams.string('id')
   queryParams.assertEmpty()
   const bodyString = params.string('bodyString')
+  const body = params.stringOrArray('body')
   params.assertEmpty()
 
   const request = agent.delete(path)
-  if (queryString) {
+  if (util.isDefined(queryString)) {
     request.query(queryString)
   } else {
     request.query(query)
   }
-  if (bodyString) {
+  if (util.isDefined(bodyString)) {
     request.type('json').send(bodyString)
+  } else if (util.isDefined(body)) {
+    request.send(body)
   }
   return request
 }
@@ -192,6 +204,8 @@ function verifyInsertFailure (r) {
   return r
 }
 
+const verifyReplaceSuccess = verifyInsertSuccess
+
 function verifyReplaceFailure (r) {
   expect(r.status).to.equal(400)
   expect(r.body['api:status']).to.equal('api:failure')
@@ -199,8 +213,22 @@ function verifyReplaceFailure (r) {
   return r
 }
 
+function verifyReplaceNotFound (r) {
+  expect(r.status).to.equal(404)
+  expect(r.body['api:status']).to.equal('api:not_found')
+  expect(r.body['@type']).to.equal('api:ReplaceDocumentErrorResponse')
+  return r
+}
+
 function verifyDelSuccess (r) {
   expect(r.status).to.equal(200)
+  return r
+}
+
+function verifyDelNotFound (r) {
+  expect(r.status).to.equal(404)
+  expect(r.body['api:status']).to.equal('api:not_found')
+  expect(r.body['@type']).to.equal('api:DeleteDocumentErrorResponse')
   return r
 }
 
@@ -226,8 +254,11 @@ module.exports = {
   verifyGetFailure,
   verifyInsertSuccess,
   verifyInsertFailure,
+  verifyReplaceSuccess,
   verifyReplaceFailure,
+  verifyReplaceNotFound,
   verifyDelSuccess,
+  verifyDelNotFound,
   expectMissingField,
   expectMissingParameter,
 }

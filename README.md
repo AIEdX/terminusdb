@@ -38,10 +38,10 @@ TerminusX is a cloud data platform built on TerminusDB. TerminusX is in **public
 
 ## [🚀 Installation Guide](https://terminusdb.com/docs/v10.0/#/overviews/get-started)
 
-| <p align="center"><a href="https://hub.docker.com/r/terminusdb/terminusdb-server">🐋 Docker (Universal) | <p align="center"><a href="https://pypi.org/project/terminusdb-client/">🐍 Python  | <p align="center"><a href="https://github.com/terminusdb/terminusdb-client">🌐 JavaScript | <p align="center"><a href="https://terminusdb.com/docs/v10.0/#/install/install-from-source-code">⛵ TerminusX (managed service) |
+| <p align="center"><a href="https://terminusdb.com/docs/index/terminusdb/install/install-as-docker-container">🐋 Docker (Universal) | <p align="center"><a href="https://pypi.org/project/terminusdb-client/">🐍 Python  | <p align="center"><a href="https://github.com/terminusdb/terminusdb-client">🌐 JavaScript | <p align="center"><a href="https://dashboard.terminusdb.com/">⛵ TerminusX (managed service) |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |--------------------------------------------------------------------------------- |
 | <p align="center"><img src="https://github.com/Ciphey/Ciphey/raw/master/Pictures_for_README/docker.png" /></p>   | <p align="center"><img src="https://github.com/Ciphey/Ciphey/raw/master/Pictures_for_README/python.png" /></p> | <p align="center"><img src="https://assets.terminusdb.com/images/50a6428d99f98e808074cceaf4c755e7.png" width="100" height="100"  /></p> | <p align="center"><img src="https://assets.terminusdb.com/images/favicon.png" width="100" height="100" /></p> |
-| `./terminusdb-container run` | `python -m pip install terminusdb-client` | `$ npm install --save @terminusdb/terminusdb-client` | `managed service ftw` |
+| `docker run --name terminusdb --rm -it  -p 6363:6363 terminusdb.docker.scarf.sh/terminusdb/terminusdb-server:latest` | `python -m pip install terminusdb-client` | `$ npm install --save @terminusdb/terminusdb-client` | `managed service ftw` |
 
 
 <hr>
@@ -62,9 +62,10 @@ TerminusX is a cloud data platform built on TerminusDB. TerminusX is in **public
 
 <br/>
 TerminusDB is a powerful document-oriented graph database that provides version control features. If Neo4j, MongoDB, and Git had a superpowered baby, that would be TerminusDB. We want to facilitate users in building data-intense applications with collaborative workflows. The JSON format is now ubiquitous in application development but other systems - such as MongoDB - lack the easy ability to link documents. A schema-driven document graph opens new possibilities for building applications and working with data.  
+<br />
   
 Data-centric, domain focused, and decentralized application development.
-<br />
+
 <br /> 
 <br />  
   
@@ -90,7 +91,7 @@ align="right"
   
 
  ## Highlighted Features 
-  
+<br />  
 <img
   src="https://github.com/terminusdb/terminusdb-web-assets/blob/master/images/like-git-for-data-terminusx-V2.png"
   alt="TerminusDB DWorkflow"
@@ -120,7 +121,6 @@ Expose this functionality to your users so they can audit their application data
 <br />
 <br /> 
 <br />
-<br />
 <br /> 
 
 <img
@@ -132,7 +132,6 @@ Expose this functionality to your users so they can audit their application data
   
 <br /> 
 <br />
-<br />   
   
 If corrupt or erroneous data is infecting your application, you can immediately roll back to a working version. 
 
