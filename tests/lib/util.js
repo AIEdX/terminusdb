@@ -2,6 +2,12 @@
 
 const crypto = require('crypto')
 
+const defaultContext = {
+  '@base': 'terminusdb:///data/',
+  '@schema': 'terminusdb:///schema#',
+  '@type': '@context',
+}
+
 function deepClone (object) {
   return JSON.parse(JSON.stringify(object))
 }
@@ -39,7 +45,7 @@ function isUndefinedOrNull (val) {
 }
 
 function randomString () {
-  return crypto.randomBytes(3).toString('hex')
+  return crypto.randomBytes(16).toString('hex')
 }
 
 function typeString (val) {
@@ -61,6 +67,7 @@ function firstCapture (val, re) {
 
 module.exports = {
   deepClone,
+  defaultContext,
   firstCapture,
   isBoolean,
   isDefined,

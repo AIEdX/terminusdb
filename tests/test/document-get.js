@@ -1,4 +1,7 @@
-const { parser: jsonl } = require('stream-json/jsonl/Parser')
+const fs = require('fs/promises')
+const exec = require('util').promisify(require('child_process').exec)
+const stream = require('stream')
+const JsonlParser = require('stream-json/jsonl/Parser')
 const { expect } = require('chai')
 const { Agent, db, document, endpoint, Params, util } = require('../lib')
 
@@ -6,12 +9,6 @@ describe('document-get', function () {
   let agent
   let dbPath
   let docPath
-
-  const context = {
-    '@base': 'terminusdb:///data/',
-    '@schema': 'terminusdb:///schema#',
-    '@type': '@context',
-  }
 
   const schema = {
     '@id': 'Person',
@@ -34,6 +31,10 @@ describe('document-get', function () {
 
   const instances = [aristotle, plato, socrates]
 
+  function personId (person, prefix) {
+    return encodeURI((prefix || '') + person['@type'] + '/' + person.name)
+  }
+
   before(async function () {
     agent = new Agent().auth()
 
@@ -44,7 +45,7 @@ describe('document-get', function () {
 
     docPath = endpoint.document(dbDefaults).path
     await document
-      .insert(agent, docPath, { schema: schema })
+      .insert(agent, docPath, { schema })
       .then(document.verifyInsertSuccess)
     await document
       .insert(agent, docPath, { instance: instances })
@@ -60,11 +61,11 @@ describe('document-get', function () {
     const schemaPrefix =
       params.boolean('prefixed', true)
         ? ''
-        : context['@schema']
+        : util.defaultContext['@schema']
     params.assertEmpty()
 
     expect(objects.length).to.equal(2)
-    expect(objects[0]).to.deep.equal(context)
+    expect(objects[0]).to.deep.equal(util.defaultContext)
 
     let schema2
     if (schemaPrefix) {
@@ -76,6 +77,19 @@ describe('document-get', function () {
     expect(objects[1]).to.deep.equal(schema2)
   }
 
+  function expectSchemaJsonl (r) {
+    const objects = []
+    r.on('error', (err) => {
+      expect.fail(err)
+    })
+    r.on('data', (data) => {
+      objects.push(data.value)
+    })
+    r.on('end', () => {
+      expectSchema(objects)
+    })
+  }
+
   describe('returns expected schema stream', function () {
     const options = [
       { query: { graph_type: 'schema' } },
@@ -85,16 +99,8 @@ describe('document-get', function () {
     ]
     for (const option of options) {
       it(JSON.stringify(option), async function () {
-        const r = await document
-          .get(agent, docPath, option)
-          .pipe(jsonl())
-        const objects = []
-        r.on('data', (data) => {
-          objects.push(data.value)
-        })
-        r.on('end', () => {
-          expectSchema(objects)
-        })
+        const r = await document.get(agent, docPath, option).pipe(new JsonlParser())
+        expectSchemaJsonl(r)
       })
     }
   })
@@ -121,7 +127,7 @@ describe('document-get', function () {
     const [schemaPrefix, basePrefix] =
       params.boolean('prefixed', true)
         ? ['', '']
-        : [context['@schema'], context['@base']]
+        : [util.defaultContext['@schema'], util.defaultContext['@base']]
     params.assertEmpty()
 
     if (count > instances.length - skip) {
@@ -146,10 +152,23 @@ describe('document-get', function () {
       const order = schemaPrefix + 'order'
       expect(object[order]).to.equal(expected.order)
       delete object[order]
-      expect(object['@id']).to.equal(encodeURI(basePrefix + 'Person/' + expected.name))
+      expect(object['@id']).to.equal(personId(expected, basePrefix))
       delete object['@id']
       expect(Object.keys(object).length).to.equal(0)
     }
+  }
+
+  function expectInstancesJsonl (r) {
+    const objects = []
+    r.on('error', (err) => {
+      expect.fail(err)
+    })
+    r.on('data', (data) => {
+      objects.push(data.value)
+    })
+    r.on('end', () => {
+      expectInstances(objects, instances)
+    })
   }
 
   describe('returns expected instance stream', function () {
@@ -162,7 +181,7 @@ describe('document-get', function () {
       it(JSON.stringify(option), async function () {
         const r = await document
           .get(agent, docPath, option)
-          .pipe(jsonl())
+          .pipe(new JsonlParser())
         const objects = []
         r.on('data', (data) => {
           objects.push(data.value)
@@ -334,7 +353,7 @@ describe('document-get', function () {
       it(JSON.stringify(query), async function () {
         Object.assign(query, { '@type': 'Person' })
         const r = await document
-          .get(agent, docPath, { body: { query: query } })
+          .get(agent, docPath, { body: { query } })
           .then(document.verifyGetSuccess)
         expectInstances([r.body], instances.slice(index, index + 1))
       })
@@ -371,12 +390,11 @@ describe('document-get', function () {
     })
 
     after(async function () {
-      await document
-        .del(agent, docPath, { body: localInstances.map((i) => i['@id']) })
-        .then(document.verifyDelSuccess)
-      await document
-        .del(agent, docPath, { query: { graph_type: 'schema', id: 'Group' } })
-        .then(document.verifyDelSuccess)
+      const ids = localInstances
+        .map((i) => i['@id'])
+        .concat(localInstances.flatMap((i) => i.people || []).map((p) => personId(p)))
+      await document.del(agent, docPath, { body: ids }).then(document.verifyDelSuccess)
+      await document.del(agent, docPath, { query: { graph_type: 'schema', id: localSchema['@id'] } }).then(document.verifyDelSuccess)
     })
 
     const q1 = { '@type': 'Group' }
@@ -390,7 +408,7 @@ describe('document-get', function () {
         const copy = Object.assign({}, instance)
         if (instance.people) {
           if (instance.people.length) {
-            copy.people = instance.people.map((p) => encodeURI(p['@type'] + '/' + p.name))
+            copy.people = instance.people.map((p) => personId(p))
           } else {
             delete copy.people
           }
@@ -433,11 +451,12 @@ describe('document-get', function () {
     })
 
     after(async function () {
+      const ids = localInstances
+        .map((i) => i['@id'])
+        .concat(localInstances.flatMap((i) => i.friend ? [i.friend] : []).map((p) => personId(p)))
+      await document.del(agent, docPath, { body: ids }).then(document.verifyDelSuccess)
       await document
-        .del(agent, docPath, { body: localInstances.map((i) => i['@id']) })
-        .then(document.verifyDelSuccess)
-      await document
-        .del(agent, docPath, { query: { graph_type: 'schema', id: 'Friendship' } })
+        .del(agent, docPath, { query: { graph_type: 'schema', id: localSchema['@id'] } })
         .then(document.verifyDelSuccess)
     })
 
@@ -451,7 +470,7 @@ describe('document-get', function () {
       for (const instance of localInstances) {
         const copy = Object.assign({}, instance)
         if (instance.friend) {
-          copy.friend = encodeURI(instance.friend['@type'] + '/' + instance.friend.name)
+          copy.friend = personId(instance.friend)
         }
         expectedInstances.push(copy)
       }
@@ -467,6 +486,48 @@ describe('document-get', function () {
         })
         .then(document.verifyGetSuccess)
       expectInstances(r.body, [socrates, gödel])
+    })
+  })
+
+  describe('empty local database', function () {
+    let dbSpec
+    let url
+
+    before(async function () {
+      process.env.TERMINUSDB_SERVER_DB_PATH = './storage/' + util.randomString()
+      const r = await exec('./terminusdb.sh store init --force')
+      expect(r.stdout).to.match(/^Successfully initialised database/)
+      dbSpec = agent.orgName + '/' + agent.dbName
+      url = agent.baseUrl + '/' + dbSpec
+    })
+
+    after(async function () {
+      await fs.rm(process.env.TERMINUSDB_SERVER_DB_PATH, { recursive: true })
+      delete process.env.TERMINUSDB_SERVER_DB_PATH
+    })
+
+    describe('clone remote', function () {
+      before(async function () {
+        this.timeout(20000) // Cloning this database is slow on macOS.
+        const r = await exec(`./terminusdb.sh clone --user=${agent.user} --password=${agent.password} ${url}`)
+        expect(r.stdout).to.match(/^Cloning the remote 'origin'/)
+        expect(r.stdout).to.match(new RegExp(`Database created: ${dbSpec}`))
+      })
+
+      after(async function () {
+        const r = await exec(`./terminusdb.sh db delete ${dbSpec}`)
+        expect(r.stdout).to.match(new RegExp(`Database deleted: ${dbSpec}`))
+      })
+
+      it('passes doc get with expected schema', async function () {
+        const r = await exec(`./terminusdb.sh doc get ${dbSpec} --graph_type=schema`)
+        expectSchemaJsonl(stream.Readable.from(r.stdout).pipe(new JsonlParser()))
+      })
+
+      it('passes doc get with expected instances', async function () {
+        const r = await exec(`./terminusdb.sh doc get ${dbSpec}`)
+        expectInstancesJsonl(stream.Readable.from(r.stdout).pipe(new JsonlParser()))
+      })
     })
   })
 })

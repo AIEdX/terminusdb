@@ -30,6 +30,7 @@
 :- use_module(library(pcre)).
 :- use_module(library(option)).
 :- use_module(library(yall)).
+:- use_module(library(zlib)).
 
 % unit tests
 :- use_module(library(plunit)).
@@ -420,6 +421,8 @@ test(triples_update, [
 :- http_handler(api(document/Path), cors_handler(Method, document_handler(Path), [add_payload(false)]),
                 [method(Method),
                  prefix,
+                 chunked,
+                 time_limit(infinite),
                  methods([options,post,delete,get,put])]).
 
 document_handler(get, Path, Request, System_DB, Auth) :-
@@ -455,29 +458,13 @@ document_handler(get, Path, Request, System_DB, Auth) :-
             ;   JSON_Options = []),
 
             read_data_version_header(Request, Requested_Data_Version),
-
-            cors_json_stream_start(Stream_Started),
-
-            (   nonvar(Query) % dictionaries do not need tags to be bound
-            ->  api_get_documents_by_query(System_DB, Auth, Path, Graph_Type, Compress_Ids, Unfold, Type, Query, Skip, Count, Requested_Data_Version, Actual_Data_Version, Goal),
-                forall(
-                    call(Goal, Document),
-                    cors_json_stream_write_dict(Request, As_List, Actual_Data_Version, Stream_Started, Document, JSON_Options))
-            ;   ground(Id)
-            ->  api_get_document_by_id(System_DB, Auth, Path, Graph_Type, Compress_Ids, Unfold, Requested_Data_Version, Actual_Data_Version, Id, Document),
-                cors_json_stream_write_dict(Request, As_List, Actual_Data_Version, Stream_Started, Document, JSON_Options)
-            ;   ground(Type)
-            ->  api_get_documents_by_type(System_DB, Auth, Path, Graph_Type, Compress_Ids, Unfold, Type, Skip, Count, Requested_Data_Version, Actual_Data_Version, Goal),
-                forall(
-                    call(Goal, Document),
-                    cors_json_stream_write_dict(Request, As_List, Actual_Data_Version, Stream_Started, Document, JSON_Options))
-            ;   api_get_documents(System_DB, Auth, Path, Graph_Type, Compress_Ids, Unfold, Skip, Count, Requested_Data_Version, Actual_Data_Version, Goal),
-                forall(
-                    call(Goal, Document),
-                    cors_json_stream_write_dict(Request, As_List, Actual_Data_Version, Stream_Started, Document, JSON_Options))
-            ),
-
-            cors_json_stream_end(Request, As_List, Actual_Data_Version, Stream_Started)
+            api_read_document_selector(
+                System_DB, Auth, Path, Graph_Type, Skip, Count,
+                As_List, Unfold, Id, Type, Compress_Ids, Query,
+                JSON_Options,
+                Requested_Data_Version, Actual_Data_Version,
+                cors_json_stream_write_headers_(Request, Actual_Data_Version)
+            )
         )).
 
 document_handler(post, Path, Request, System_DB, Auth) :-
@@ -498,10 +485,18 @@ document_handler(post, Path, Request, System_DB, Auth) :-
             param_value_search_message(Search, Message),
             param_value_search_graph_type(Search, Graph_Type),
             param_value_search_optional(Search, full_replace, boolean, false, Full_Replace),
+            param_value_search_optional(Search, raw_json, boolean, false, Raw_JSON),
 
             read_data_version_header(Request, Requested_Data_Version),
 
-            api_insert_documents(System_DB, Auth, Path, Graph_Type, Author, Message, Full_Replace, Stream, Requested_Data_Version, New_Data_Version, Ids),
+            Options = options{
+                          graph_type : Graph_Type,
+                          author : Author,
+                          message : Message,
+                          full_replace : Full_Replace,
+                          raw_json : Raw_JSON
+                      },
+            api_insert_documents(System_DB, Auth, Path, Stream, Requested_Data_Version, New_Data_Version, Ids, Options),
 
             write_cors_headers(Request),
             write_data_version_header(New_Data_Version),
@@ -525,13 +520,18 @@ document_handler(delete, Path, Request, System_DB, Auth) :-
             param_value_search_optional(Search, id, non_empty_atom, _, Id),
 
             read_data_version_header(Request, Requested_Data_Version),
+            Options = options{
+                          author : Author,
+                          message : Message,
+                          graph_type : Graph_Type
+                      },
 
             (   Nuke = true
-            ->  api_nuke_documents(System_DB, Auth, Path, Graph_Type, Author, Message, Requested_Data_Version, New_Data_Version)
+            ->  api_nuke_documents(System_DB, Auth, Path, Requested_Data_Version, New_Data_Version, Options)
             ;   ground(Id)
-            ->  api_delete_document(System_DB, Auth, Path, Graph_Type, Author, Message, Id, Requested_Data_Version, New_Data_Version)
+            ->  api_delete_document(System_DB, Auth, Path, Id, Requested_Data_Version, New_Data_Version, Options)
             ;   http_read_json_semidet(stream(Stream), Request)
-            ->  api_delete_documents(System_DB, Auth, Path, Graph_Type, Author, Message, Stream, Requested_Data_Version, New_Data_Version)
+            ->  api_delete_documents(System_DB, Auth, Path, Stream, Requested_Data_Version, New_Data_Version, _Ids, Options)
             ;   throw(error(missing_targets, _))
             ),
 
@@ -554,10 +554,17 @@ document_handler(put, Path, Request, System_DB, Auth) :-
             param_value_search_message(Search, Message),
             param_value_search_graph_type(Search, Graph_Type),
             param_value_search_optional(Search, create, boolean, false, Create),
+            param_value_search_optional(Search, raw_json, boolean, false, Raw_JSON),
 
             read_data_version_header(Request, Requested_Data_Version),
-
-            api_replace_documents(System_DB, Auth, Path, Graph_Type, Author, Message, Stream, Create, Requested_Data_Version, New_Data_Version, Ids),
+            Options = options{
+                author : Author,
+                message : Message,
+                graph_type : Graph_Type,
+                create : Create,
+                raw_json : Raw_JSON
+            },
+            api_replace_documents(System_DB, Auth, Path, Stream, Requested_Data_Version, New_Data_Version, Ids, Options),
 
             write_cors_headers(Request),
             write_data_version_header(New_Data_Version),
@@ -647,7 +654,7 @@ woql_handler_helper(Request, System_DB, Auth, Path_Option) :-
 
             read_data_version_header(Request, Requested_Data_Version),
 
-            woql_query_json(System_DB, Auth, Path_Option, Query, Commit_Info, Files, All_Witnesses, Requested_Data_Version, New_Data_Version, Response),
+            woql_query_json(System_DB, Auth, Path_Option, json_query(Query), Commit_Info, Files, All_Witnesses, Requested_Data_Version, New_Data_Version, _Context, Response),
 
             write_cors_headers(Request),
             write_data_version_header(New_Data_Version),
@@ -1334,17 +1341,26 @@ unpack_handler(post, Path, Request, System_DB, Auth) :-
 %:- end_tests(unpack_endpoint).
 
 %%%%%%%%%%%%%%%%%%%% TUS Handler %%%%%%%%%%%%%%%%%%%%%%%%%
-:- http_handler(api(files), auth_wrapper(tus_dispatch),
+:- http_handler(api(files), tus_auth_wrapper(tus_dispatch),
                 [ methods([options,head,post,patch,delete]),
                   prefix
                 ]).
 
-:- meta_predicate auth_wrapper(2,?).
-auth_wrapper(Goal,Request) :-
+:- meta_predicate tus_auth_wrapper(2,?).
+tus_auth_wrapper(Goal,Request) :-
     open_descriptor(system_descriptor{}, System_Database),
     catch((      authenticate(System_Database, Request, Auth),
                  www_form_encode(Auth, Domain),
-                 call(Goal, [domain(Domain)], Request)),
+                 (   memberchk(x_terminusdb_api_base(Pre_Base), Request)
+                 ->  terminal_slash(Pre_Base, Base),
+                     atom_concat(Base, 'api/files', Endpoint),
+                     Options0 = [resumable_endpoint_base(Endpoint)]
+                 ;   Options0 = []
+                 ),
+                 (   file_upload_storage_path(Path)
+                 ->  Options = [tus_storage_path(Path)|Options0]
+                 ;   Options = Options0),
+                 call(Goal, [domain(Domain)|Options], Request)),
           error(authentication_incorrect(_Reason),_),
           (   reply_json(_{'@type' : 'api:ErrorResponse',
                            'api:status' : 'api:failure',
@@ -2533,18 +2549,25 @@ patch_handler(post, Request, System_DB, Auth) :-
              } :< Document),
         error(bad_api_document(Document, [before, patch]), _)),
 
+    % We should take options about final state here.
     api_report_errors(
         patch,
         Request,
-        (   (   api_patch(System_DB, Auth, Patch, Before, After)
+        (   api_patch(System_DB, Auth, Patch, Before, Result, Document),
+            (   Result = success(After)
             ->  cors_reply_json(Request, After)
-            ;   cors_reply_json(Request, null, [status(404)])
+            ;   Result = conflict(Conflict)
+            ->  cors_reply_json(Request, Conflict, [status(409)])
             )
         )
     ).
 
 %%%%%%%%%%%%%%%%%%%% Diff handler %%%%%%%%%%%%%%%%%%%%%%%%%
-:- http_handler(api(diff), cors_handler(Method, diff_handler),
+:- http_handler(api(diff), cors_handler(Method, diff_handler(none{})),
+                [method(Method),
+                 time_limit(infinite),
+                 methods([options,post])]).
+:- http_handler(api(diff/Path), cors_handler(Method, diff_handler(Path)),
                 [method(Method),
                  prefix,
                  time_limit(infinite),
@@ -2555,24 +2578,99 @@ patch_handler(post, Request, System_DB, Auth) :-
  *
  * Reset a branch to a new commit.
  */
-diff_handler(post, Request, System_DB, Auth) :-
-    do_or_die(
-        (   get_payload(Document, Request),
-            _{ before : Before,
-               after : After
-             } :< Document),
-        error(bad_api_document(Document, [before, after]), _)),
+diff_handler(post, Path, Request, System_DB, Auth) :-
+    get_payload(Document, Request),
+    do_or_die((   _{ before : Before,
+                     after : After
+                   } :< Document,
+                  Operation = document
+              ;   _{ before_data_version : Before_Version
+                   } :< Document,
+                  (   _{ after_data_version: After_Version}
+                      :< Document,
+                      (   _{ document_id: Doc_ID} :< Document
+                      ->  Operation = versioned_document
+                      ;   Operation = all_documents)
+                  ;   _{ after: After_Document,
+                         document_id : Doc_ID} :< Document,
+                      Operation = versioned_document_document)
+              ),
+              error(bad_api_document(Document, [before, after]), _)),
 
-    (   _{ keep : Keep } :< Document
-    ->  true
-    ;   Keep = _{ '@id' : true, '_id' : true }
+    % We could probably just feed the document in,
+    % the default is dubious.
+    (   get_dict(keep,Document,_)
+    ->  Options = Document
+    ;   put_dict(_{ keep : _{ '@id' : true, '_id' : true }},
+                 Document, Options)
     ),
 
     api_report_errors(
         diff,
         Request,
-        (   api_diff(System_DB, Auth, Before, After, Keep, Patch),
+        (   (   Operation = document
+            ->  api_diff(System_DB, Auth, Before, After, Patch, Options)
+            ;   Operation = versioned_document
+            ->  api_diff_id(System_DB, Auth, Path, Before_Version,
+                            After_Version, Doc_ID, Patch, Options)
+            ;   Operation = all_documents
+            ->  api_diff_all_documents(System_DB, Auth, Path, Before_Version, After_Version, Patch, Options)
+            ;   api_diff_id_document(System_DB, Auth, Path,
+                                     Before_Version, After_Document,
+                                     Doc_ID, Patch, Options)
+            ),
             cors_reply_json(Request, Patch)
+        )
+    ).
+
+%%%%%%%%%%%%%%%%%%%% Apply handler %%%%%%%%%%%%%%%%%%%%%%%%%
+:- http_handler(api(apply/Path), cors_handler(Method, apply_handler(Path)),
+                [method(Method),
+                 prefix,
+                 time_limit(infinite),
+                 methods([options,post])]).
+
+/*
+ * apply_handler(Mode, Path, Request, System, Auth) is det.
+ *
+ * Reset a branch to a new commit.
+ */
+apply_handler(post, Path, Request, System_DB, Auth) :-
+    get_payload(Document, Request),
+    do_or_die((   _{ before_commit: Before_Commit,
+                     after_commit: After_Commit,
+                     commit_info: Commit_Info
+                   } :< Document
+              ),
+              error(bad_api_document(Document, [before_commit,after_commit,commit_info,type]))
+             ),
+
+    (   _{ match_final_state: Match_Final_State } :< Document
+    ->  true
+    ;   Match_Final_State = true
+    ),
+
+    (   _{ type: Type } :< Document
+    ->  atom_string(Type_Atom, Type)
+    ;   Type_Atom = squash
+    ),
+
+    api_report_errors(
+        apply,
+        Request,
+        catch(
+            (   api_apply_squash_commit(System_DB, Auth, Path, Commit_Info,
+                                        Before_Commit, After_Commit,
+                                        [type(Type_Atom),match_final_state(Match_Final_State)]),
+                cors_reply_json(Request,
+                                json{'@type' : "api:ApplyResponse",
+                                     'api:status' : "api:success"})),
+            error(apply_squash_witnesses(Witnesses)),
+            (   cors_reply_json(Request,
+                                json{'@type' : "api:ApplyError",
+                                     'api:witnesses' : Witnesses,
+                                     'api:status' : 'api:conflict'},
+                                [status(409),serialize_unknown(true)]))
         )
     ).
 
@@ -2749,12 +2847,12 @@ customise_exception(E) :-
 api_error_http_reply(API, Error, Request) :-
     api_error_jsonld(API,Error,JSON),
     json_http_code(JSON,Status),
-    cors_reply_json(Request,JSON,[status(Status)]).
+    cors_reply_json(Request,JSON,[status(Status),serialize_unknown(true)]).
 
 api_error_http_reply(API, Error, Type, Request) :-
     api_error_jsonld(API,Error,Type,JSON),
     json_http_code(JSON,Status),
-    cors_reply_json(Request,JSON,[status(Status)]).
+    cors_reply_json(Request,JSON,[status(Status),serialize_unknown(true)]).
 
 :- meta_predicate api_report_errors(?,?,0).
 api_report_errors(API,Request,Goal) :-
@@ -2857,6 +2955,7 @@ authenticate(System_Askable, Request, Auth) :-
     insecure_user_header_key(Header_Key),
     Header =.. [Header_Key, Username],
     memberchk(Header, Request),
+    !,
     (   username_auth(System_Askable, Username, Auth)
     ->  true
     ;   format(string(Message), "User '~w' failed to authenticate with header '~w'", [Username, Header_Key]),
@@ -2906,13 +3005,13 @@ cors_reply_json(Request, JSON, Options) :-
     reply_json(JSON, [json_object(dict)|Options]).
 
 /**
- * cors_json_stream_write_headers_(+Request, +As_List, +Data_Version) is det.
+ * cors_json_stream_write_headers_(+Request, +Data_Version, +As_List) is det.
  *
  * Write CORS and JSON headers. This should only be called in the following:
  *   - cors_json_stream_end
  *   - cors_json_stream_write_dict
  */
-cors_json_stream_write_headers_(Request, As_List, Data_Version) :-
+cors_json_stream_write_headers_(Request, Data_Version, As_List) :-
     write_cors_headers(Request),
     write_data_version_header(Data_Version),
     (   As_List = true
@@ -2921,81 +3020,6 @@ cors_json_stream_write_headers_(Request, As_List, Data_Version) :-
     ;   % Write the JSON stream header.
         format("Content-type: application/json; stream=true; charset=UTF-8~n~n")).
 
-/**
-* cors_json_stream_start(-Stream_Started) is det.
- *
- * Initialize the sequence of predicates used for writing a JSON stream to
- * output.
- *
- * After this, use cors_json_stream_write_dict to write JSON dictionaries to the
- * stream.
- *
- * (The implemntation is simple, but the predicate name is good documentation.)
- */
-cors_json_stream_start(Stream_Started) :-
-    var(Stream_Started),
-    !,
-    Stream_Started = stream_started(false).
-cors_json_stream_start(Stream_Started) :-
-    throw(error(unexpected_argument_instantiation(cors_json_stream_start, Stream_Started), _)).
-
-/**
- * cors_json_stream_end(+Request, +As_List, +Data_Version, +Stream_Started) is det.
- *
- * Finalize the sequence of predicates used for writing a JSON stream to output.
- *
- * This is the last thing to do after writing all the JSON dictionaries to the
- * stream.
- */
-cors_json_stream_end(Request, As_List, Data_Version, stream_started(Started)) :-
-    !,
-    % Write the headers in case they weren't written.
-    (   Started = true
-    ->  true
-    ;   cors_json_stream_write_headers_(Request, As_List, Data_Version)),
-
-    % Write the list end character (right square bracket).
-    (   As_List = true
-    ->  format("]~n")
-    ;   true).
-cors_json_stream_end(_Request, _As_List, _Data_Version, Stream_Started) :-
-    throw(error(unexpected_argument_instantiation(cors_json_stream_end, Stream_Started), _)).
-
-/**
- * cors_json_stream_write_dict(+Request, +As_List, +Data_Version, +Stream_Started, +JSON, +JSON_Options) is det.
- *
- * Write a single JSON dictionary to the stream or list with the appropriate
- * separators. If this is the first dictionary in the stream, write the headers
- * before writing the dictionary.
- *
- * After writing all the JSON dictionaries to the stream, use
- * cors_json_stream_end to end it.
- */
-cors_json_stream_write_dict(Request, As_List, Data_Version, Stream_Started, JSON, JSON_Options) :-
-    % Get the current value of Stream_Started before we possibly update it with
-    % nb_setarg.
-    Stream_Started = stream_started(Started),
-
-    % Write the headers in case they weren't written. Update Stream_Started, so
-    % that we don't write them again.
-    (   Started = true
-    ->  true
-    ;   nb_setarg(1, Stream_Started, true),
-        cors_json_stream_write_headers_(Request, As_List, Data_Version)),
-
-    % Write the list separator (comma).
-    (   Started = true,
-        As_List = true
-    ->  format(",")
-    ;   true),
-
-    % Write the JSON dictionary.
-    json_write_dict(current_output, JSON, JSON_Options),
-
-    % Write the stream separator (newline).
-    (   As_List = true
-    ->  true
-    ;   format("~n")).
 
 %%%%%%%%%%%%%%%%%%%% Response Predicates %%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -3084,6 +3108,15 @@ check_content_length(Request) :-
         memberchk(content_length(_), Request),
         error(missing_content_length, _)).
 
+content_encoded(Request, Encoding) :-
+    memberchk(content_encoding(Encoding), Request),
+    do_or_die(
+        accepted_encoding(Encoding),
+        error(unsupported_content_encoding(Encoding), _)).
+
+accepted_encoding(deflate).
+accepted_encoding(gzip).
+
 /*
  * get_param_default(Key,Request:request,Value,Default) is semidet.
  *
@@ -3142,16 +3175,18 @@ read_json_dict(AtomOrText, JSON) :-
  *   - string(String) to read into a string
  *   - json_dict(JSON) to read into a JSON dict
  */
-http_read_utf8(string(String), Request) :-
-    % Force the input encoding to be UTF-8 to avoid the default octet encoding.
-    % TODO: SWI-Prolog v8.4.1 allows us to set the encoding using the `input_encoding`
-    % option as follows. When we upgrade, we can change this.
-    %http_read_data(Request, String, [to(string), input_encoding(utf8)]).
-    % But, for now, we just override it:
-    http_read_data([content_type('application/json; charset=UTF-8')|Request], String, [to(string)]).
 http_read_utf8(stream(Stream), Request) :-
-    http_read_utf8(string(String), Request),
-    open_string(String, Stream).
+    (   content_encoded(Request, Encoding)
+    ->  memberchk(input(Input_Stream), Request),
+        zopen(Input_Stream, Uncompressed_Stream, [format(Encoding), multi_part(false)]),
+        read_string(Uncompressed_Stream, _, S1),
+        open_string(S1, Stream)
+    ;   http_read_data(Request, String, [to(string), input_encoding(utf8)]),
+        open_string(String, Stream)
+    ).
+http_read_utf8(string(String), Request) :-
+    http_read_utf8(stream(Stream), Request),
+    read_string(Stream, _Length, String).
 http_read_utf8(json_dict(JSON), Request) :-
     http_read_utf8(string(String), Request),
     read_json_dict(String, JSON).

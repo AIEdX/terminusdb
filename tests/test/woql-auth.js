@@ -78,8 +78,8 @@ describe('woql-auth', function () {
     const r = await woql
       .post(agent, woqlPath, anInsertDocumentQuery)
       .then(woql.verifyGetFailure)
-    expect(r.body['api:error']['@type']).to.equal('api:TypeNotFound')
-    expect(r.body['api:error']['api:type']).to.equal(randomType0)
+    expect(r.body['api:error']['@type']).to.equal('api:WOQLSchemaCheckFailure')
+    expect(r.body['api:error']['api:witnesses'][0]['@type']).to.equal('ascribed_type_does_not_exist')
   })
 
   describe('with schema', function () {
@@ -91,7 +91,7 @@ describe('woql-auth', function () {
 
     before(async function () {
       await document
-        .insert(agent, docPath, { schema: schema })
+        .insert(agent, docPath, { schema })
         .then(document.verifyInsertSuccess)
     })
 
