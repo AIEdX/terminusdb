@@ -545,8 +545,8 @@ is_dict(Value) =>
     infer_type(Database, Prefixes, Type, Value, _, Annotated, Captures).
 check_value_type(_Database,_Prefixes,Value,Type,_Annotated,_Captures),
 is_list(Value) =>
-    throw(error(schema_check_failure(witness{ '@type' : unexpected_list,
-                                              value: Value, type : Type }), _)).
+    throw(error(schema_check_failure([witness{ '@type' : unexpected_list,
+                                               value: Value, type : Type }]), _)).
 check_value_type(_Database,_Prefixes,Value,Type,Annotated,Captures),
 is_base_type(Type) =>
     no_captures(Captures),
@@ -619,7 +619,7 @@ candidate_subsumed(Database,'http://terminusdb.com/schema/sys#Top', Candidate, D
     \+ is_abstract(Database, Candidate).
 candidate_subsumed(Database, Super, Candidate, Dictionary) =>
     matches_shape(Database, Candidate, Dictionary),
-    class_subsumed(Database, Super, Candidate).
+    class_subsumed(Database, Candidate, Super).
 
 infer_type(Database, Prefixes, Dictionary, Type, Annotated) :-
     empty_assoc(In),
