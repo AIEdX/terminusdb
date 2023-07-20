@@ -16,6 +16,7 @@
               assert_write_access/4,
               authorisation_object/3,
               user_accessible_database/3,
+              user_accessible_database/5,
               check_descriptor_auth/4,
               is_super_user/1,
               is_super_user/2,
@@ -36,7 +37,8 @@
               add_organization/2,
               add_organization/3,
               add_organization_transaction/3,
-              add_user_organization_transaction/4
+              add_user_organization_transaction/4,
+              generate_password_hash/2
 
           ]).
 

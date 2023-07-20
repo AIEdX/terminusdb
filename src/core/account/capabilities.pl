@@ -15,6 +15,7 @@
               assert_write_access/4,
               authorisation_object/3,
               user_accessible_database/3,
+              user_accessible_database/5,
               check_descriptor_auth/4,
               is_super_user/1,
               is_super_user/2,
@@ -120,19 +121,20 @@ auth_action_scope(DB, Auth, Action, Scope_Iri) :-
         (
             t(Auth, capability, Capability),
             t(Capability, role, Role),
+            t(Role, action, Action),
             t(Capability, scope, Intermediate_Scope_Iri),
-            path(Intermediate_Scope_Iri, (star((p(child);p(database)))), Scope_Iri, _),
-            t(Role, action, Action)
+            path(Intermediate_Scope_Iri, (star((p(child);p(database)))), Scope_Iri, _)
         )
        ).
 auth_action_scope(DB, _Auth, Action, Scope_Iri) :-
     % For access to everything that the anonymous user has...
+    % This does not allow transitive scoping to work as written, but relies on the
+    % API setting up a capability for each database marked public
     ask(DB,
-        (   t(anonymous, capability, Capability),
-            isa(Capability, 'Capability'),
-            t(Capability, scope, Scope_Iri),
-            t(Capability, role, anonymous_role),
-            t(anonymous_role, action, Action)
+        (   t(Capability, scope, Scope_Iri),
+            t('User/anonymous', capability, Capability),
+            t(Capability, role, Role),
+            t(Role, action, Action)
         )
        ).
 
@@ -164,11 +166,12 @@ write_type_access(instance,'@schema':'Action/instance_write_access').
 write_type_access(schema,'@schema':'Action/schema_write_access').
 
 is_super_user(Auth) :-
-    is_super_user(Auth, _{ '@base' : 'terminusdb://system/data/' }).
+    Prefixes = _{ '@base' : 'terminusdb://system/data/' },
+    is_super_user(Auth, Prefixes).
 
 is_super_user(Auth,Prefixes) :-
     super_user_authority(URI),
-    prefixed_to_uri(Auth, Prefixes, URI).
+    uri_eq(Auth, URI, Prefixes).
 
 require_super_user(Context) :-
     % This allows us to shortcut looking in the database,
@@ -313,6 +316,12 @@ assert_read_access(Context) :-
     is_super_user(Context.authorization, Context.prefixes),
     % This probably makes all super user checks redundant.
     !.
+assert_read_access(Context) :-
+    system_descriptor{} :< Context.default_collection,
+    !,
+    Auth = (Context.authorization),
+    DB = (Context.system),
+    assert_auth_action_scope(DB, Auth, '@schema':'Action/meta_read_access', 'system').
 assert_read_access(Context) :-
     database_descriptor{
         organization_name: Organization_Name,
@@ -488,6 +497,36 @@ user_accessible_database(DB, User_ID, Database) :-
             isa(Database_ID, 'UserDatabase'),
             get_document(Database_ID, Database)
         )).
+
+/**
+ * user_accessible_database(DB,User_ID,Org,Name,Database) is det.
+ *
+ * Finds a database object accessible to a user.
+ */
+user_accessible_database(DB, User_ID, Org, Name, Database) :-
+    (   ground(Org)
+    ->  atom_string(Org, Org_S)
+    ;   true),
+    (   ground(Name)
+    ->  atom_string(Name, Name_S)
+    ;   true),
+    ask(DB,
+        (   t(User_ID, capability, Capability_ID),
+            path(Capability_ID, (star(p(scope)),p(database)), Database_ID),
+            isa(Database_ID, 'UserDatabase'),
+            t(Database_ID, name, Name_S^^xsd:string),
+            t(Org_Id, database, Database_ID),
+            t(Org_Id, name, Org_S^^xsd:string),
+            get_document(Database_ID, Database)
+        )),
+    (   var(Org)
+    ->  atom_string(Org, Org_S)
+    ;   true),
+    (   var(Name)
+    ->  atom_string(Name, Name_S)
+    ;   true
+    ).
+
 
 check_descriptor_auth_(system_descriptor{},Action,Auth,System_DB) :-
     assert_auth_action_scope(System_DB,Auth,Action,system).

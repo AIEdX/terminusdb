@@ -9,6 +9,7 @@
               db_path/1,
               jwt_jwks_endpoint/1,
               jwt_enabled/0,
+              jwt_subject_claim_name/1,
               registry_path/1,
               tmp_path/1,
               server_worker_options/1,
@@ -27,8 +28,16 @@
               check_insecure_user_header_enabled/1,
               clear_check_insecure_user_header_enabled/0,
               clear_insecure_user_header_key/0,
-              pinned_databases/1
-          ]).
+              pinned_databases/1,
+              pinned_organizations/1,
+              plugin_path/1,
+              dashboard_enabled/0,
+              parallelize_enabled/0,
+              grpc_label_endpoint/1,
+              crypto_password_cost/1,
+              lru_cache_size/1,
+              trust_migrations/0
+]).
 
 :- use_module(library(pcre)).
 
@@ -38,8 +47,9 @@
 :- use_module(library(apply)).
 :- use_module(library(yall)).
 
+
 /* [[[cog import cog; cog.out(f"terminusdb_version('{CURRENT_REPO_VERSION}').") ]]] */
-terminusdb_version('10.1.2').
+terminusdb_version('11.1.0').
 /* [[[end]]] */
 
 bootstrap_config_files :-
@@ -82,10 +92,19 @@ default_database_path(Path) :-
  * db_path(-Path) is det.
  *
  * Database storage path.
+ *
  */
 :- table db_path/1 as shared.
 db_path(Path) :-
     default_database_path(Path).
+
+dashboard_enabled :-
+    getenv_default('TERMINUSDB_ENABLE_DASHBOARD', true, Value),
+    Value = true.
+
+plugin_path(Path) :-
+    getenv_default('TERMINUSDB_PLUGINS_PATH', './storage/plugins', Value),
+    absolute_file_name(Value, Path).
 
 jwt_enabled_env_var :-
     getenv_default('TERMINUSDB_JWT_ENABLED', false, true).
@@ -109,14 +128,16 @@ jwt_jwks_endpoint(Endpoint) :-
     ->  false
     ;   Endpoint = Value).
 
+jwt_subject_claim_name(Name) :-
+    getenv_default('TERMINUSDB_JWT_AGENT_NAME_PROPERTY', 'preferred_username', Name).
+
 registry_path(Value) :-
     once(expand_file_search_path(plugins('registry.pl'), Path)),
     getenv_default('TERMINUSDB_SERVER_REGISTRY_PATH', Path, Value).
 
+:- table tmp_path/1 as shared.
 tmp_path(Value) :-
-    user:file_search_path(terminus_home, Dir),
-    atom_concat(Dir,'/tmp',TmpPathRelative),
-    getenv_default('TERMINUSDB_SERVER_TMP_PATH', TmpPathRelative, Value).
+    getenv_default('TERMINUSDB_SERVER_TMP_PATH', '/tmp', Value).
 
 :- table file_upload_storage_path/1 as shared.
 file_upload_storage_path(Path) :-
@@ -274,3 +295,37 @@ pinned_databases(Pinned) :-
     !,
     parse_pinned_databases(Pinned_Env, Pinned).
 pinned_databases([]).
+
+
+parse_pinned_organizations(Pinned_Env, Pinned) :-
+    merge_separator_split(Pinned_Env, ',', Pinned_Atoms),
+    maplist(atom_string, Pinned_Atoms, Pinned).
+
+:- table pinned_organizations/1.
+pinned_organizations(Pinned) :-
+    getenv('TERMINUSDB_PINNED_ORGANIZATIONS', Pinned_Env),
+    !,
+    parse_pinned_organizations(Pinned_Env, Pinned).
+pinned_organizations([]).
+
+:- table parallelize_enabled.
+parallelize_enabled :-
+    getenv_default('TERMINUSDB_PARALLELIZE_ENABLED', true, true).
+
+:- table grpc_label_endpoint/1.
+grpc_label_endpoint(Endpoint) :-
+    getenv('TERMINUSDB_GRPC_LABEL_ENDPOINT', Endpoint).
+
+crypto_password_cost(10).
+
+:- table lru_cache_size/1.
+lru_cache_size(Cache_Size) :-
+    getenv_default_number('TERMINUSDB_LRU_CACHE_SIZE', 512, Cache_Size).
+
+:- table trust_migrations/0.
+trust_migrations :-
+    getenv('TERMINUSDB_TRUST_MIGRATIONS', true).
+
+:- table semantic_indexer_endpoint/1.
+semantic_indexer_endpoint(Endpoint) :-
+    getenv('TERMINUSDB_SEMANTIC_INDEXER_ENDPOINT', Endpoint).

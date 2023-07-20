@@ -26,10 +26,8 @@ initialise_hup :-
 
 
 initialise_log_settings :-
-    (   getenv('TERMINUSDB_LOG_PATH', Log_Path)
-    ->  set_setting(http:logfile, Log_Path)
-    ;   get_time(Time),
-        asserta(http_log:log_stream(user_error, Time))).
+    get_time(Time),
+    asserta(http_log:log_stream(user_error, Time)).
 
 :-multifile prolog:message//1.
 
@@ -51,6 +49,7 @@ prolog:message(server_missing_config(BasePath)) -->
 
 :- use_module(core(query/json_woql),[initialise_woql_contexts/0]).
 :- use_module(core(api), [initialize_flags/0, bootstrap_files/0]).
+:- use_module(core(plugins)).
 
 :- use_module(config(terminus_config)).
 
@@ -70,4 +69,6 @@ main(_Argv) :-
     bootstrap_config_files,
     bootstrap_files,
     debug(terminus(main), 'initialise_woql_contexts completed', []),
-    debug(terminus(main), 'initialise_log_settings completed', []).
+    debug(terminus(main), 'initialise_log_settings completed', []),
+
+    load_plugins.

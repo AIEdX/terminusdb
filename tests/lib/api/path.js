@@ -97,8 +97,25 @@ module.exports = {
   organization () {
     return '/api/organization'
   },
+  organizationName (params, extra) {
+    params = new Params({ ...params, ...extra })
+    const orgName = params.stringRequired('orgName')
+    return `/api/organization/${orgName}`
+  },
   patch () {
     return '/api/patch'
+  },
+  patchDb (params, extra) {
+    params = new Params({ ...params, ...extra })
+    const orgName = params.stringRequired('orgName')
+    const dbName = params.stringRequired('dbName')
+    return `/api/patch/${orgName}/${dbName}`
+  },
+  graphQL (params, extra) {
+    params = new Params({ ...params, ...extra })
+    const orgName = params.stringRequired('orgName')
+    const dbName = params.stringRequired('dbName')
+    return `/api/graphql/${orgName}/${dbName}`
   },
   prefixes (params, extra) {
     params = new Params({ ...params, ...extra })

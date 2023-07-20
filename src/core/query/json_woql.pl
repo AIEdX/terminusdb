@@ -29,7 +29,6 @@
 :- use_module(library(apply_macros)).
 
 :- use_module(library(lists)).
-:- use_module(library(plunit)).
 
 :- dynamic woql_context/1.
 initialise_woql_contexts :-
@@ -432,6 +431,25 @@ json_type_to_woql_ast('DeleteObject',JSON,WOQL,Path) :-
 json_type_to_woql_ast('AddTriple',JSON,WOQL,Path) :-
     _{subject : Subject,
       predicate : Predicate,
+      object : Object,
+      graph : Graph
+     } :< JSON,
+    json_value_to_woql_ast(Subject,WQA,[subject
+                                        |Path]),
+    json_value_to_woql_ast(Predicate,WQB,[predicate
+                                          |Path]),
+    json_value_to_woql_ast(Object,WQC,[object
+                                       |Path]),
+    json_data_to_woql_ast(Graph,WG),
+    do_or_die(
+        (WG = Graph_String^^_),
+        error(woql_syntax_error(JSON,
+                                [graph|Path],
+                                Graph), _)),
+    WOQL = insert(WQA,WQB,WQC,Graph_String).
+json_type_to_woql_ast('AddTriple',JSON,WOQL,Path) :-
+    _{subject : Subject,
+      predicate : Predicate,
       object : Object
      } :< JSON,
     json_value_to_woql_ast(Subject,WQA,[subject
@@ -444,6 +462,25 @@ json_type_to_woql_ast('AddTriple',JSON,WOQL,Path) :-
 json_type_to_woql_ast('AddedTriple',JSON,WOQL,Path) :-
     _{subject : Subject,
       predicate : Predicate,
+      object : Object,
+      graph : Graph
+     } :< JSON,
+    json_value_to_woql_ast(Subject,WQA,[subject
+                                        |Path]),
+    json_value_to_woql_ast(Predicate,WQB,[predicate
+                                          |Path]),
+    json_value_to_woql_ast(Object,WQC,[object
+                                       |Path]),
+    json_data_to_woql_ast(Graph,WG),
+    do_or_die(
+        (WG = Graph_String^^_),
+        error(woql_syntax_error(JSON,
+                                [graph|Path],
+                                Graph), _)),
+    WOQL = addition(WQA,WQB,WQC,Graph_String).
+json_type_to_woql_ast('AddedTriple',JSON,WOQL,Path) :-
+    _{subject : Subject,
+      predicate : Predicate,
       object : Object
      } :< JSON,
     json_value_to_woql_ast(Subject,WQA,[subject
@@ -453,6 +490,25 @@ json_type_to_woql_ast('AddedTriple',JSON,WOQL,Path) :-
     json_value_to_woql_ast(Object,WQC,[object
                                        |Path]),
     WOQL = addition(WQA,WQB,WQC).
+json_type_to_woql_ast('RemovedTriple',JSON,WOQL,Path) :-
+    _{subject : Subject,
+      predicate : Predicate,
+      object : Object,
+      graph : Graph
+     } :< JSON,
+    json_value_to_woql_ast(Subject,WQA,[subject
+                                        |Path]),
+    json_value_to_woql_ast(Predicate,WQB,[predicate
+                                          |Path]),
+    json_value_to_woql_ast(Object,WQC,[object
+                                       |Path]),
+    json_data_to_woql_ast(Graph,WG),
+    do_or_die(
+        (WG = Graph_String^^_),
+        error(woql_syntax_error(JSON,
+                                [graph|Path],
+                                Graph), _)),
+    WOQL = removal(WQA,WQB,WQC,Graph_String).
 json_type_to_woql_ast('RemovedTriple',JSON,WOQL,Path) :-
     _{subject : Subject,
       predicate : Predicate,
@@ -997,12 +1053,22 @@ json_type_to_woql_path_pattern('PathTimes',JSON,Pattern,Path) :-
     json_data_to_woql_ast(N,WN),
     json_data_to_woql_ast(M,WM),
     do_or_die(
-        (WN = N_int ^^ _),
+        (   WN = N_int_Pre ^^ _,
+            (   integer(N_int_Pre)
+            ->  N_int_Pre = N_int
+            ;   number_string(N_int, N_int_Pre)
+            )
+        ),
         error(woql_syntax_error(JSON,
                                 [from|Path],
                                 N), _)),
     do_or_die(
-        (WM = M_int ^^ _),
+        (   WM = M_int_Pre ^^ _,
+            (   integer(N_int_Pre)
+            ->  M_int_Pre = M_int
+            ;   number_string(M_int, M_int_Pre)
+            )
+        ),
         error(woql_syntax_error(JSON,
                                 [to|Path],
                                 M), _)),
@@ -1427,7 +1493,7 @@ test(gyear_int, []) :-
                                       "@type": "xsd:gYear"}}}',
     atom_json_dict(JSON_Atom, JSON, []),
     json_woql(JSON,WOQL),
-    WOQL = (v('X')=gyear(2004,0.0)^^'http://www.w3.org/2001/XMLSchema#gYear').
+    WOQL = (v('X')=gyear(2004,0)^^'http://www.w3.org/2001/XMLSchema#gYear').
 
 test(gyear_month, []) :-
     JSON_Atom= '{"@type": "Equals",

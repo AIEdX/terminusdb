@@ -6,6 +6,7 @@
 
               % casting.pl
               typecast/4,
+              typecast_switch/5,
 
               % database_utils.pl
               system_graph_layer/2,
@@ -18,12 +19,10 @@
               error_on_excluded_organization/1,
               error_on_excluded_database/1,
 
-              % iana.pl
-              iana/3,
-
               % literals.pl
               literal_to_turtle/2,
               normalise_triple/2,
+              reset_normalise_warning/0,
               object_storage/2,
               ground_object_storage/2,
               storage_object/2,
@@ -40,6 +39,7 @@
               instance_uri_to_prefixed/3,
               prefixed_to_uri/3,
               prefixed_to_property/3,
+              uri_eq/3,
 
               % temp_graph.pl
               extend_database_with_temp_graph/6,
@@ -90,6 +90,7 @@
               super_user_authority/1,
 
               % triplestore
+              safe_graph_name_length_ok/1,
               safe_create_named_graph/3,
               safe_named_graph_exists/2,
               safe_open_named_graph/3,
@@ -120,19 +121,22 @@
               insert_turtle_graph/2,
               dump_turtle_graph/2,
 
-              % upgrade_db.pl
+              % check_db.pl
               get_db_version/1,
+              get_db_version/2,
+              set_db_version/0,
               set_db_version/1,
-              maybe_upgrade/0
+              set_db_version/2,
+              database_version/1,
+              assert_database_version_is_current/1
           ]).
 
 :- use_module(triple/base_type).
 :- use_module(triple/casting).
 :- use_module(triple/database_utils).
-:- use_module(triple/iana).
 :- use_module(triple/literals).
 :- use_module(triple/temp_graph).
 :- use_module(triple/constants).
 :- use_module(triple/triplestore).
 :- use_module(triple/turtle_utils).
-:- use_module(triple/upgrade_db).
+:- use_module(triple/check_db).

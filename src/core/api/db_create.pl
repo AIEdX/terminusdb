@@ -1,9 +1,13 @@
 :- module(db_create, [
               create_db_unfinalized/10,
               create_db/9,
+              create_db/10,
               create_schema/3,
               create_ref_layer/1,
-              finalize_db/1
+              finalize_db/1,
+              make_db_private/2,
+              make_db_public/2,
+              validate_prefixes/1
           ]).
 
 /** <module> Implementation of database graph management
@@ -73,23 +77,42 @@ finalize_db(DB_Uri) :-
         ;   throw(error(database_in_inconsistent_state))),
         _).
 
-make_db_public(System_Context,DB_Uri) :-
-    insert_document(
-        System_Context,
-        _{
-            '@type' : 'Capability',
-            'scope' : DB_Uri,
-            'role' : [ 'Role/consumer' ]
-        },
-        Capability_Uri),
-
+make_db_private(System_Context,Db_Uri) :-
     ask(System_Context,
-        (   insert('User/anonymous', capability, Capability_Uri))).
+        (   t(Cap_Id, scope, Db_Uri),
+            t(Cap_Id, role, 'Role/consumer'),
+            delete_document(Cap_Id))
+       ).
+
+make_db_public(System_Context,DB_Uri) :-
+    (   ask(System_Context,
+            (   t(Cap_Id, scope, DB_Uri),
+                t(Cap_Id, role, 'Role/consumer'),
+                t('User/anonymous', capability, Cap_Id)
+            ))
+    ->  true
+    ;   insert_document(
+            System_Context,
+            _{
+                '@type' : 'Capability',
+                'scope' : DB_Uri,
+                'role' : [ 'Role/consumer' ]
+            },
+            Capability_Uri),
+        ask(System_Context,
+            (   insert('User/anonymous', capability, Capability_Uri)))
+    ).
+
+error_on_invalid_graph_name(Organization, Database) :-
+    organization_database_name(Organization, Database, Name),
+    do_or_die(safe_graph_name_length_ok(Name),
+              error(database_name_too_long(Organization, Database), _)).
 
 create_db_unfinalized(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, Db_Uri) :-
     validate_prefixes(Prefixes),
     error_on_excluded_organization(Organization_Name),
     error_on_excluded_database(Database_Name),
+    error_on_invalid_graph_name(Organization_Name, Database_Name),
 
     % Run the initial checks and insertion of db object in system graph inside of a transaction.
     % If anything fails, everything is retried, including the auth checks.
@@ -166,6 +189,9 @@ validate_prefixes(Prefixes) :-
                      error(invalid_uri_prefix(Prefix_Name, Prefix_Value), _))).
 
 create_db(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes) :-
+    create_db(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, _).
+
+create_db(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, Db_Uri) :-
     create_db_unfinalized(System_DB, Auth, Organization_Name, Database_Name, Label, Comment, Schema, Public, Prefixes, Db_Uri),
 
     % update system with finalized

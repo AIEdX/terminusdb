@@ -13,12 +13,14 @@
 :- use_module(core(triple)).
 :- use_module(core(util/utils)).
 :- use_module(core(api)).
+:- use_module(core(plugins)).
 
 % configuration predicates
 :- use_module(config(terminus_config),[jwt_enabled/0,
                                        jwt_jwks_endpoint/1,
                                        server/1,
                                        server_port/1,
+                                       log_format/1,
                                        worker_amount/1,
                                        is_enterprise/0,
                                        terminusdb_version/1]).
@@ -32,6 +34,7 @@
 :- use_module(library(http/http_dispatch)).
 :- use_module(library(http/http_ssl_plugin)).
 :- use_module(library(http/html_write)).
+:- use_module(library(aggregate)).
 
 :- use_module(library(option)).
 
@@ -61,7 +64,8 @@ terminus_server(Argv,Wait) :-
     server_port(Port),
     worker_amount(Workers),
     load_jwt_conditionally,
-    HTTPOptions = [port(Port), workers(Workers)],
+    HTTPOptions = [port(Port), workers(Workers), silent(true)],
+    foreach(pre_server_startup_hook(Port),true),
     catch(http_server(http_dispatch, HTTPOptions),
           E,
           (
@@ -90,6 +94,7 @@ terminus_server(Argv,Wait) :-
     (   triple_store(_Store), % ensure triple store has been set up by retrieving it once
         http_delete_handler(id(busy_loading)),
         welcome_banner(Server,Argv),
+        foreach(post_server_startup_hook(Port),true),
         (   Wait = true
         ->  http_current_worker(Port,ThreadID),
             thread_join(ThreadID, _Status)
@@ -112,15 +117,25 @@ loading_page -->
         p('TerminusDB is still synchronizing backing store')
     ]).
 
+
+print_welcome_banner(Version, Enterprise, Argv, _, _, Server) :-
+    log_format(json),
+    !,
+    format(user_error, '{"message": "Welcome to TerminusDB ~s! You can view your server in a browser at ~s",\c
+                          "version": "~s", "args": "~w", "severity": "INFO"}~n',
+          [Enterprise, Server, Version, Argv]).
+print_welcome_banner(Version, Enterprise, Argv, StrTime, Now, Server) :-
+    format(user_error,'~N% TerminusDB server started at ~w (utime ~w) args ~w~n',
+           [StrTime, Now, Argv]),
+    format(user_error,'% Welcome to TerminusDB\'s~w terminusdb-server, version ~s!~n',[Enterprise, Version]),
+    format(user_error,'% You can view your server in a browser at \'~s\'~n~n',[Server]).
+
 welcome_banner(Server,Argv) :-
     % Test utils currently reads this so watch out if you change it!
     get_time(Now),
     terminusdb_version(Version),
     format_time(string(StrTime), '%A, %b %d, %H:%M:%S %Z', Now, posix),
-    format(user_error,'~N% TerminusDB server started at ~w (utime ~w) args ~w~n',
-           [StrTime, Now, Argv]),
     (   is_enterprise
     ->  Enterprise = ' Enterprise'
     ;   Enterprise = ''),
-    format(user_error,'% Welcome to TerminusDB\'s~w terminusdb-server, version ~s!~n',[Enterprise, Version]),
-    format(user_error,'% You can view your server in a browser at \'~s\'~n~n',[Server]).
+    print_welcome_banner(Version, Enterprise, Argv, StrTime, Now, Server).

@@ -246,7 +246,7 @@ module.exports = {
       }
     },
     deleteSuccess: {
-      status: 200,
+      status: 204,
     },
     deleteFailure (errorObject) {
       const result = {
@@ -357,6 +357,13 @@ module.exports = {
       status: 200,
       body: {
         '@type': 'api:TriplesInsertResponse',
+        'api:status': 'api:success',
+      },
+    },
+    updateSuccess: {
+      status: 200,
+      body: {
+        '@type': 'api:TriplesUpdateResponse',
         'api:status': 'api:success',
       },
     },

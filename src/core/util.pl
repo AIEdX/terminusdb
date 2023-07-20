@@ -76,6 +76,7 @@
               zip/3,
               intersperse/3,
               interpolate/2,
+              alternate/2,
               interpolate_string/2,
               unique_solutions/3,
               repeat_term/3,
@@ -118,6 +119,8 @@
               whole_arg/2,
               random_string/1,
               uri_has_prefix/1,
+              uri_has_prefix/2,
+              uri_has_prefix_unsafe/2,
               uri_has_protocol/1,
               choice_points/1,
               sol_bag/2,
@@ -146,6 +149,9 @@
               with_memory_file_stream/3,
               with_memory_file_stream/4,
               terminal_slash/2,
+              dict_field_verifier/3,
+              count_solutions/2,
+              negative_to_infinity/2,
 
               % speculative_parse.pl
               %guess_date/2,
@@ -197,6 +203,7 @@
               point//2,
               url//0,
               ncname//0,
+              name//0,
               nmtoken//0,
               normalizedString//0,
 
@@ -244,6 +251,7 @@
               param_value_search_optional/5,
               param_value_json_required/4,
               param_value_json_optional/5,
+              param_value_search_or_json/5,
               param_value_search_or_json_required/5,
               param_value_search_or_json_optional/6,
               param_value_search_author/2,
@@ -260,9 +268,16 @@
               meta_data_version/3,
 
               % json_stream.pl
-              json_stream_start/1,
-              json_stream_end/3,
-              json_stream_write_dict/5
+              json_stream_start/2,
+              json_stream_end/1,
+              json_stream_write_dict/3,
+
+              % iana.pl
+              iana/2,
+              iana/3,
+
+              % lazy_docs.pl
+              stream_to_lazy_docs/2
           ]).
 
 % note: test_utils is intentionally omitted
@@ -279,3 +294,5 @@
 :- use_module(util/json_log).
 :- use_module(util/data_version).
 :- use_module(util/json_stream).
+:- use_module(util/iana).
+:- use_module(util/lazy_docs).

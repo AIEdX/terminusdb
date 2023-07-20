@@ -1,5 +1,6 @@
 :- module(casting,[
-              typecast/4
+              typecast/4,
+              typecast_switch/5
           ]).
 
 /** <module> Casting
@@ -19,8 +20,8 @@
 
 :- use_module(library(lists)).
 
+:- use_module(library(option)).
 :- use_module(library(apply)).
-:- use_module(library(plunit)).
 :- use_module(library(yall)).
 :- use_module(library(apply_macros)).
 :- use_module(library(url)).
@@ -34,7 +35,8 @@ typecast(Val, Type, Hint, Cast) :-
     ->  format(atom(M), 'Variable unbound in typecast to ~q', [Type]),
         throw(error(M))
     ;   (   \+ (   base_type(Type)
-               ;   Type = 'http://www.w3.org/2002/07/owl#Thing')
+               ;   Type = 'http://www.w3.org/2002/07/owl#Thing'
+               ;   Type = 'http://terminusdb.com/schema/sys#Top')
         ->  throw(error(unknown_type_casting_error(Val, Type), _))
         ;   Val = Bare_Literal^^Source_Type,
             (   basetype_subsumption_of(Source_Type,'http://www.w3.org/2001/XMLSchema#string')
@@ -75,10 +77,26 @@ typecast_switch('http://www.w3.org/2001/XMLSchema#string', 'http://www.w3.org/20
     !,
     atom_string(Val,String).
 %%% xsd:string => owl:Thing
-typecast_switch('http://www.w3.org/2002/07/owl#Thing', 'http://www.w3.org/2001/XMLSchema#string', Val, _, Atom) :-
+typecast_switch('http://www.w3.org/2002/07/owl#Thing', 'http://www.w3.org/2001/XMLSchema#string', Val, Hints, Atom) :-
     /* Note: It might be wise to check URI validity */
     !,
-    format(atom(Atom), '~w', [Val]).
+    (   option(prefixes(Prefixes), Hints)
+    ->  prefix_expand(Val, Prefixes, Atom)
+    ;   format(atom(Atom), '~w', [Val])
+    ).
+%%% sys:Top => xsd:string
+typecast_switch('http://www.w3.org/2001/XMLSchema#string', 'http://terminusdb.com/schema/sys#Top', Val, _, String^^'http://www.w3.org/2001/XMLSchema#string') :-
+    atom(Val),
+    !,
+    atom_string(Val,String).
+%%% xsd:string => sys:Top
+typecast_switch('http://terminusdb.com/schema/sys#Top', 'http://www.w3.org/2001/XMLSchema#string', Val, Hints, Atom) :-
+    /* Note: It might be wise to check URI validity */
+    !,
+    (   option(prefixes(Prefixes), Hints)
+    ->  prefix_expand(Val, Prefixes, Atom)
+    ;   format(atom(Atom), '~w', [Val])
+    ).
 %%% xsd:string => xdd:coordinatePolygon
 typecast_switch('http://terminusdb.com/schema/xdd#coordinatePolygon', 'http://www.w3.org/2001/XMLSchema#string', Val, _, Cast^^'http://terminusdb.com/schema/xdd#coordinatePolygon') :-
     !,
@@ -327,7 +345,7 @@ typecast_switch('http://www.w3.org/2001/XMLSchema#gYear', 'http://www.w3.org/200
 typecast_switch('http://www.w3.org/2001/XMLSchema#gYear', 'http://www.w3.org/2001/XMLSchema#decimal', Val, _, Cast^^'http://www.w3.org/2001/XMLSchema#gYear') :-
     !,
     (   integer(Val)
-    ->  Cast = gyear(Val,0.0)
+    ->  Cast = gyear(Val,0)
     ;   throw(error(casting_error(Val,'http://www.w3.org/2001/XMLSchema#gYear'),_))).
 %%% xsd:gYear => xsd:string
 typecast_switch('http://www.w3.org/2001/XMLSchema#string', 'http://www.w3.org/2001/XMLSchema#gYear', Val, _, S^^'http://www.w3.org/2001/XMLSchema#string') :-
@@ -389,6 +407,20 @@ typecast_switch('http://www.w3.org/2001/XMLSchema#duration', 'http://www.w3.org/
     (   duration_string(Cast,Val)
     ->  true
     ;   throw(error(casting_error(Val,'http://www.w3.org/2001/XMLSchema#duration'),_))).
+%%% xsd:string => xsd:yearMonthDuration
+typecast_switch('http://www.w3.org/2001/XMLSchema#yearMonthDuration', 'http://www.w3.org/2001/XMLSchema#string', Val, _, Cast^^'http://www.w3.org/2001/XMLSchema#yearMonthDuration') :-
+    !,
+    (   duration_string(Cast,Val),
+        Cast = duration(_Sign,_Y,_M,_D,0,0,0)
+    ->  true
+    ;   throw(error(casting_error(Val,'http://www.w3.org/2001/XMLSchema#yearMonthduration'),_))).
+%%% xsd:string => xsd:dayTimeDuration
+typecast_switch('http://www.w3.org/2001/XMLSchema#dayTimeDuration', 'http://www.w3.org/2001/XMLSchema#string', Val, _, Cast^^'http://www.w3.org/2001/XMLSchema#dayTimeDuration') :-
+    !,
+    (   duration_string(Cast,Val),
+        Cast = duration(_Sign,0,0,_D,_H,_M,_S)
+    ->  true
+    ;   throw(error(casting_error(Val,'http://www.w3.org/2001/XMLSchema#dayTimeDuration'),_))).
 %%% xsd:duration => xsd:string
 typecast_switch('http://www.w3.org/2001/XMLSchema#string', 'http://www.w3.org/2001/XMLSchema#duration', Val, _, S^^'http://www.w3.org/2001/XMLSchema#string') :-
     !,
@@ -887,8 +919,25 @@ test(positive_decimal_round_trip, []) :-
     ].
 
 test(gyear_to_string, []) :-
-    typecast(gyear(1990,0.0)^^'http://www.w3.org/2001/XMLSchema#gYear',
+    typecast(gyear(1990,0)^^'http://www.w3.org/2001/XMLSchema#gYear',
              'http://www.w3.org/2001/XMLSchema#string', [], "1990"^^'http://www.w3.org/2001/XMLSchema#string').
+
+test(string_to_gyear, []) :-
+    typecast("1990"^^'http://www.w3.org/2001/XMLSchema#string',
+             'http://www.w3.org/2001/XMLSchema#gYear', [],
+             gyear(1990,0)^^'http://www.w3.org/2001/XMLSchema#gYear').
+
+test(integer_to_gyear, []) :-
+    typecast(1990^^'http://www.w3.org/2001/XMLSchema#integer',
+             'http://www.w3.org/2001/XMLSchema#gYear', [],
+             gyear(1990,0)^^'http://www.w3.org/2001/XMLSchema#gYear').
+
+test(float_cast, []) :-
+    typecast("0.5679"^^'http://www.w3.org/2001/XMLSchema#string',
+             'http://www.w3.org/2001/XMLSchema#decimal',
+             [],
+             0.5679^^'http://www.w3.org/2001/XMLSchema#decimal').
+
 
 test(float_cast, []) :-
     typecast("0.5679"^^'http://www.w3.org/2001/XMLSchema#string',

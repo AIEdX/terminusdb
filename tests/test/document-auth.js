@@ -116,6 +116,51 @@ describe('document', function () {
       await document.insert(agent, { instance })
     })
 
+    it('passes HEAD call on existing db and with permissions', async function () {
+      const systemPath = api.path.documentSystem()
+      const response = await agent.head(systemPath).send()
+      expect(response.headers['terminusdb-data-version']).to.match(/^system:/)
+      expect(response.statusCode).to.equal(200)
+    })
+
+    it('returns 404 on HEAD call on non-existing db', async function () {
+      const path = api.path.document({ orgName: 'admin', dbName: 'nonExistingDb' })
+      const response = await agent.head(path).send()
+      expect(response.statusCode).to.equal(404)
+    })
+
+    it('returns 400 on HEAD call with wrong data-version', async function () {
+      const path = api.path.documentSystem()
+      const response = await agent.head(path)
+        .set('Terminusdb-Data-Version', 'system:nonMatchingDataVersion')
+        .send()
+      expect(response.statusCode).to.equal(400)
+    })
+
+    it('returns 200 on HEAD call with proper data-version', async function () {
+      const systemPath = api.path.documentSystem()
+      const response = await agent.head(systemPath).send()
+      const dataVersion = response.headers['terminusdb-data-version']
+      const responseWithDataVersion = await agent.head(systemPath)
+        .set('Terminusdb-Data-Version', dataVersion)
+        .send()
+      expect(responseWithDataVersion.statusCode).to.equal(200)
+    })
+
+    it('returns 403 forbidden on HEAD call with user that does not have DB access', async function () {
+      const systemPath = api.path.documentSystem()
+      const userName = util.randomString()
+      await agent
+        .post('/api/users')
+        .send({
+          name: userName,
+          password: userName,
+        })
+      const agentNewUser = new Agent().auth({ user: userName, password: userName, skipJwt: true })
+      const response = await agentNewUser.head(systemPath).send()
+      expect(response.statusCode).to.equal(403)
+    })
+
     it('fails on subdocument @key checks (#566)', async function () {
       const schema = { '@type': 'Class', '@subdocument': [] }
       schema['@id'] = util.randomString()
@@ -145,7 +190,6 @@ describe('document', function () {
         const instance = [
           { '@type': type1, '@id': `terminusdb:///data/${type1}/1` },
           { '@type': type2, '@id': `terminusdb:///data/${type2}/1`, ref: `terminusdb:///data/${type1}/1` },
-          { '@type': type2, '@id': `terminusdb:///data/${type2}/2`, ref: { '@id': `terminusdb:///data/${type1}/1` } },
           { '@type': type2, '@id': `terminusdb:///data/${type2}/3`, ref: { '@id': `terminusdb:///data/${type1}/1`, '@type': '@id' } },
         ]
         await document.insert(agent, { instance })
@@ -297,6 +341,64 @@ describe('document', function () {
           await document.insert(agent, { schema }).fails(api.error.keyFieldsIsEmpty(schema))
         })
       }
+    })
+
+    describe('Deep replace/insertions', function () {
+      let A
+      let B
+      let schema
+      before(async function () {
+        A = util.randomString()
+        B = util.randomString()
+        schema = [
+          {
+            '@type': 'Class',
+            '@id': A,
+            b: B,
+          },
+          {
+            '@type': 'Class',
+            '@unfoldable': [],
+            '@id': B,
+            x: 'xsd:string',
+          }]
+        await document.insert(agent, { schema })
+      })
+
+      it('add in parallel', async function () {
+        const instance = [
+          { b: { '@id': `${B}/1`, x: 'asdf' } },
+          { b: { '@id': `${B}/1`, x: 'fdsa' } },
+        ]
+        const result = await document.insert(agent, { instance }).unverified()
+        expect(result.body['api:error']['@type']).to.equal('api:SameDocumentIdsMutatedInOneTransaction')
+        expect(result.body['api:error']['api:duplicate_ids']).to.deep.equal([`terminusdb:///data/${B}/1`])
+      })
+
+      it('deep replace', async function () {
+        const instance = [
+          {
+            '@id': `${A}/2`,
+            b: {
+              '@id': `${B}/2`,
+              x: 'asdf',
+            },
+          },
+        ]
+        await document.insert(agent, { instance }).unverified()
+        const instance2 = [
+          {
+            '@id': `${A}/2`,
+            b: {
+              '@id': `${B}/2`,
+              x: 'fdsa',
+            },
+          },
+        ]
+        await document.replace(agent, { instance: instance2 })
+        const result = await document.get(agent, { query: { id: `${A}/2` } })
+        expect(result.body.b.x).to.equal('fdsa')
+      })
     })
 
     it('succeeds when ignoring optional combined with oneof (#992)', async function () {
@@ -505,8 +607,8 @@ describe('document', function () {
       it('passes insert, get JSONDocument', async function () {
         const r1 = await document.insert(agent, { instance: { a: [42, 23, 12] }, raw_json: true })
         const id = r1.body[0]
-        const r2 = await document.get(agent, { query: { id, as_list: true } })
-        expect(r2.body).to.deep.equal([{ '@id': id, a: [42, 23, 12] }])
+        const r2 = await document.get(agent, { query: { id, as_list: true, compress_ids: false } })
+        expect(r2.body).to.deep.equal([{ '@id': id, a: ['42', '23', '12'] }])
       })
 
       it('fails insert with invalid JSONDocument @id', async function () {
@@ -514,6 +616,104 @@ describe('document', function () {
         const id = `terminusdb:///data/${instance['@id']}`
         await document.insert(agent, { instance, raw_json: true }).fails(api.error.invalidJSONDocumentId(id))
       })
+
+      it('fails gracefully with bad key prefix', async function () {
+        const classid = `foo:${util.randomString()}`
+        const instance = { '@type': classid }
+        const result = await document.insert(agent, { instance }).unverified()
+        expect(result.status).to.equal(400)
+        expect(result.body['api:error']['api:key']).to.equal(classid)
+      })
+
+      it('fails with JSONDocument', async function () {
+        const schema = {
+          '@type': 'Class',
+          '@id': util.randomString(),
+          json_document: 'sys:JSONDocument',
+        }
+        const result = await document.insert(agent, { schema }).unverified()
+        expect(result.status).to.equal(400)
+        expect(result.body['api:error']['@type']).to.equal('api:JSONDocumentInvalidRangeError')
+        expect(result.body['api:error']['api:field']).to.equal('json_document')
+      })
+
+      it('fails duplicate language schema', async function () {
+        const schema = {
+          '@type': 'Class',
+          '@id': util.randomString(),
+          '@documentation': [{
+            '@language': 'en',
+            '@label': 'Example Class',
+            '@comment': 'This is an example class',
+            '@properties': { name: 'name' },
+          }, {
+            '@language': 'en',
+            '@label': 'Παράδειγμα τάξης',
+            '@comment': 'Αυτό είναι ένα παράδειγμα κλάσης',
+            '@properties': { name: 'όνομα' },
+          }],
+          name: 'xsd:string',
+        }
+        const r = await document.insert(agent, { schema }).unverified()
+        expect(r.status).to.equal(400)
+        expect(r.body['api:error']['@type']).to.equal('api:LanguageTagsRepeated')
+        expect(r.body['api:error']['api:languages']).to.deep.equal(['en'])
+      })
+
+      it('fails no language schema', async function () {
+        const schema = {
+          '@type': 'Class',
+          '@id': util.randomString(),
+          '@documentation': [{
+            '@label': 'Example Class',
+            '@comment': 'This is an example class',
+            '@properties': { name: 'name' },
+          }, {
+            '@language': 'en',
+            '@label': 'Παράδειγμα τάξης',
+            '@comment': 'Αυτό είναι ένα παράδειγμα κλάσης',
+            '@properties': { name: 'όνομα' },
+          }],
+          name: 'xsd:string',
+        }
+        const r = await document.insert(agent, { schema }).unverified()
+        expect(r.status).to.equal(400)
+        expect(r.body['api:error']['@type']).to.equal('api:NoLanguageTagForMultilingual')
+      })
+
+      it('saves metadata', async function () {
+        const schema = {
+          '@type': 'Class',
+          '@id': util.randomString(),
+          '@metadata': { some: 'metadata' },
+          name: 'xsd:string',
+        }
+        await document.insert(agent, { schema }).unverified()
+        const r = await document.get(agent, { query: { graph_type: 'schema', id: schema['@id'] } }).unverified()
+        expect(r.body['@metadata']).to.deep.equal({ some: 'metadata' })
+      })
+
+      it('fails bad enum', async function () {
+        const schema = {
+          '@type': 'Enum',
+          '@id': util.randomString(),
+        }
+        const r = await document.insert(agent, { schema }).unverified()
+        expect(r.status).to.equal(400)
+        expect(r.body['api:error']['@type']).to.equal('api:InvalidEnumValues')
+      })
+    })
+
+    it('fails with 404 for nonexistent schema document', async function () {
+      const r = await document.get(agent, { query: { graph_type: 'schema', id: 'asdf' } }).unverified()
+      expect(r.status).to.equal(404)
+      expect(r.body['api:error']['@type']).to.equal('api:DocumentNotFound')
+    })
+
+    it('fails with 404 for nonexistent instance document', async function () {
+      const r = await document.get(agent, { query: { id: 'asdf' } }).unverified()
+      expect(r.status).to.equal(404)
+      expect(r.body['api:error']['@type']).to.equal('api:DocumentNotFound')
     })
   })
 })

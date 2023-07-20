@@ -2,6 +2,7 @@
               literal_to_string/2,
               literal_to_turtle/2,
               normalise_triple/2,
+              reset_normalise_warning/0,
               object_storage/2,
               ground_object_storage/2,
               storage_object/2,
@@ -19,7 +20,8 @@
               schema_uri_to_prefixed/3,
               instance_uri_to_prefixed/3,
               prefixed_to_uri/3,
-              prefixed_to_property/3
+              prefixed_to_property/3,
+              uri_eq/3
           ]).
 
 /** <module> Literals
@@ -36,7 +38,6 @@
 :- use_module(core(triple/casting), [typecast/4]).
 :- use_module(core(triple/base_type), [basetype_subsumption_of/2]).
 
-:- use_module(library(plunit)).
 /*
  * date_time_string(-Date_Time,+String) is det.
  * date_time_string(+Date_Time,-String) is det.
@@ -143,7 +144,7 @@ gyear_string(GYear, String) :-
     (   Offset =:= 0
     ->  format(string(String), '~|~`0t~d~4+', [Year])
     ;   offset_to_sign_hour_minute(Offset,Sign,Hour,Minute),
-        format(string(String), '~|~`0t~d~4+~|~`0t~d~2+:~|~`0t~d~2+', [Year,Sign,Hour,Minute])
+        format(string(String), '~|~`0t~d~4+~w~|~`0t~d~2+:~|~`0t~d~2+', [Year,Sign,Hour,Minute])
     ).
 gyear_string(gyear(Year,Offset), String) :-
     nonvar(String),
@@ -268,7 +269,7 @@ duration_string(Duration,String) :-
     (   D \= 0
     ->  format(atom(DP),'~wD',[D])
     ;   DP = ''),
-    (   \+ (HH =:= 0, MM =:= 0, SS =:= 0)
+    (   \+ (HH =:= 0, MM =:= 0, SS =:= 0.0)
     ->  TP = 'T'
     ;   TP = ''),
     (   HH \= 0
@@ -277,7 +278,7 @@ duration_string(Duration,String) :-
     (   MM \= 0
     ->  format(atom(MMP),'~wM',[MM])
     ;   MMP = ''),
-    (   SS \= 0
+    (   SS \= 0.0
     ->  format(atom(SSP),'~wS',[SS])
     ;   SSP = ''),
     atomic_list_concat([SP,'P',YP,MP,DP,TP,HHP,MMP,SSP],Atom),
@@ -331,11 +332,26 @@ turtle_to_literal(literal(type(Type,A)),Val^^Type) :-
     atom_string(A,S),
     typecast(S^^'http://www.w3.org/2001/XMLSchema#string', Type, [], Val^^_),
     !.
-turtle_to_literal(literal(L),String@en) :-
+turtle_to_literal(literal(L),String^^'http://www.w3.org/2001/XMLSchema#string') :-
     (   atom(L)
     ->  atom_string(L,String)
     ;   L = String).
 
+:- dynamic normalise_warning_/0.
+
+set_normalise_warning :-
+    assertz(normalise_warning_).
+
+reset_normalise_warning :-
+    retractall(normalise_warning_).
+
+normalise_triple(rdf(X,P,Y,G),rdf(XF,P,YF)) :-
+    (   normalise_warning_
+    ->  true
+    ;   json_log_warning_formatted('Warning: ignoring graph ~q~n', [G]),
+        set_normalise_warning
+    ),
+    normalise_triple(rdf(X,P,Y),rdf(XF,P,YF)).
 normalise_triple(rdf(X,P,Y),rdf(XF,P,YF)) :-
     (   X = node(N)
     ->  atomic_list_concat(['_:',N], XF)
@@ -349,47 +365,23 @@ normalise_triple(rdf(X,P,Y),rdf(XF,P,YF)) :-
     %   Otherwise walk on by...
     ;   Y = YF).
 
-ground_object_storage(String@Lang, value(S)) :-
-    !,
-    format(string(S), '~q@~q', [String,Lang]).
-ground_object_storage(Val^^Type, value(S)) :-
-    !,
-    (   is_number_type(Type)
-    ->  format(string(S), '~q^^~q', [Val,Type])
-    ;   typecast(Val^^Type, 'http://www.w3.org/2001/XMLSchema#string',
-                 [], Cast^^_)
-    ->  format(string(S), '~q^^~q', [Cast,Type])
-    ;   format(string(S), '~q^^~q', [Val,Type])).
+ground_object_storage(String@Lang, lang(String,Lang)) :-
+    !.
+ground_object_storage(Val^^Type, value(Val,Type)) :-
+    !.
 ground_object_storage(O, node(O)).
 
 /*
  * We can only make a concrete referrent if all parts are bound.
  */
-nonvar_literal(Atom@Lang, Literal) :-
-    atom(Atom),
-    !,
-    atom_string(Atom, String),
-    nonvar_literal(String@Lang, Literal).
-nonvar_literal(Atom^^Type, Literal) :-
-    atom(Atom),
-    !,
-    atom_string(Atom, String),
-    nonvar_literal(String^^Type, Literal).
-nonvar_literal(String@Lang, value(S)) :-
+nonvar_literal(String@Lang, lang(String,Lang)) :-
     nonvar(Lang),
     nonvar(String),
-    !,
-    format(string(S), '~q@~q', [String,Lang]).
-nonvar_literal(Val^^Type, value(S)) :-
+    !.
+nonvar_literal(Term^^Type, value(Term,Type)) :-
     nonvar(Type),
-    nonvar(Val),
-    !,
-    (   is_number_type(Type)
-    ->  format(string(S), '~q^^~q', [Val,Type])
-    ;   typecast(Val^^Type, 'http://www.w3.org/2001/XMLSchema#string',
-                 [], Cast^^_)
-    ->  format(string(S), '~q^^~q', [Cast,Type])
-    ;   format(string(S), '~q^^~q', [Val,Type])).
+    nonvar(Term),
+    !.
 nonvar_literal(Val^^Type, _) :-
     once(var(Val) ; var(Type)),
     !.
@@ -398,7 +390,6 @@ nonvar_literal(Val@Lang, _) :-
     !.
 nonvar_literal(O, node(S)) :-
     nonvar(O),
-
     atom_string(O,S).
 
 object_storage(O,V) :-
@@ -445,25 +436,14 @@ storage_literal(X1@L1,X2@L2) :-
     storage_atom(L1,L2),
     storage_value(X1,X2).
 
-/*
- * Too much unnecessary marshalling...
- */
-storage_object(value(S),O) :-
-    (   term_string(Term,S)
-    ->  (   Term = X^^T
-        ->  storage_literal(X^^T,O)
-        ;   Term = X@Lang
-        ->  storage_literal(X@Lang,O)
-        ;   throw(error(storage_unknown_type_error(Term),_)))
-    ;   throw(error(storage_bad_value(S),_))).
+storage_object(lang(S,L),S@L).
+storage_object(value(S,T),S^^T).
 storage_object(node(S),O) :-
     (   nonvar(O)
     ->  (   atom(O)
         ->  atom_string(O,S)
         ;   O = S)
     ;   atom_string(O,S)).
-
-
 
 try_prefix_uri(X,_,X) :-
     nonvar(X),
@@ -524,6 +504,11 @@ instance_uri_to_prefixed(URI, Ctx, Prefixed) :-
 instance_uri_to_prefixed(URI, Ctx, Prefixed) :-
     uri_to_prefixed(URI, Ctx, Prefixed).
 
+uri_eq(Uri1, Uri2, Prefixes) :-
+    prefixed_to_uri(Uri1, Prefixes, UriExp1),
+    prefixed_to_uri(Uri2, Prefixes, UriExp2),
+    atom_string(Uri, UriExp1),
+    atom_string(Uri, UriExp2).
 
 prefixed_to_uri(Prefix:Suffix, Ctx, URI) :-
     (   get_dict(Prefix, Ctx, Base)

@@ -31,6 +31,11 @@ install-deps: install-tus
 install-tus:
 	@$(MAKE) -f distribution/Makefile.deps $@
 
+# Install the dashboard
+.PHONY: install-dashboard
+install-dashboard:
+	@$(MAKE) -f distribution/Makefile.deps $@
+
 # Install the jwt_io pack.
 .PHONY: install-jwt
 install-jwt:
@@ -62,13 +67,13 @@ i:
 	@$(MAKE) -f distribution/Makefile.prolog $@
 
 # Remove the binary.
-.PHONY: clean
-clean:
-	@$(MAKE) -f distribution/Makefile.prolog $@
+.PHONY: prolog-clean
+prolog-clean:
+	@$(MAKE) -f distribution/Makefile.prolog clean
 
 # Remove everything.
-.PHONY: realclean
-realclean: clean realclean-rust
+.PHONY: clean
+clean: realclean-rust clean-dashboard clean-deps prolog-clean
 
 # Remove the dylib.
 .PHONY: clean-rust
@@ -79,6 +84,16 @@ clean-rust:
 .PHONY: realclean-rust
 realclean-rust:
 	@$(MAKE) -f distribution/Makefile.rust realclean
+
+# Remove the dashboard
+.PHONY: clean-dashboard
+clean-dashboard:
+	@$(MAKE) -f distribution/Makefile.deps clean-dashboard
+
+# Remove the dashboard
+.PHONY: clean-deps
+clean-deps:
+	@$(MAKE) -f distribution/Makefile.deps clean-deps
 
 # Build the documentation.
 .PHONY: docs

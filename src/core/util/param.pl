@@ -15,6 +15,7 @@
               param_value_json_required/4,
               param_value_json_optional/5,
 
+              param_value_search_or_json/5,
               param_value_search_or_json_required/5,
               param_value_search_or_json_optional/6,
 
@@ -24,6 +25,8 @@
           ]).
 
 :- use_module(utils).
+
+:- use_module(library(http/json)).
 
 /*
  * Check a JSON dict parameter value against an expected type. If it's wrong,
@@ -40,6 +43,9 @@ param_check_json_(graph, "schema", schema).
 param_check_json_(graph, "instance", instance).
 param_check_json_(object, Value_In, Value_Out) :-
     is_dict(Value_In),
+    Value_Out = Value_In.
+param_check_json_(list, Value_In, Value_Out) :-
+    is_list(Value_In),
     Value_Out = Value_In.
 param_check_json_(non_empty_string, Value_In, Value_Out) :-
     string(Value_In),
@@ -71,17 +77,21 @@ param_check_search_(non_empty_atom, Value_In, Value_Out) :-
     atom(Value_In),
     Value_In \= '',
     Value_Out = Value_In.
+param_check_search_(object, Value_In, Value_Out) :-
+    atom_json_dict(Value_In, Value_Out, [default_tag(json)]).
+param_check_search_(list, Value_In, Value_Out) :-
+    atom_json_dict(Value_In, Value_Out, [default_tag(json)]).
 
 /* Check parameters common to both JSON dicts and stream lists. */
 param_check_common_(boolean, false, false).
 param_check_common_(boolean, true, true).
 param_check_common_(integer, Value_In, Value_Out) :-
-    input_to_integer(Value_In, Value_Out),
-    Value_Out = Value_In.
+    input_to_integer(Value_In, Value_Out).
 param_check_common_(nonnegative_integer, Value_In, Value_Out) :-
-    input_to_integer(Value_In, Value_Integer),
-    Value_Integer >= 0,
-    Value_Out = Value_Integer.
+    input_to_integer(Value_In, Value_Out),
+    Value_Out >= 0.
+param_check_common_(text, Value_In, Value_In) :-
+    text(Value_In).
 
 param_value_search_(Search, Param, Type, Value) :-
     memberchk(Param=Value_Unchecked, Search),
@@ -150,10 +160,18 @@ param_value_json_optional(JSON, Param, Type, Default, Value) :-
  * Get the value of a required parameter from a search list or JSON dict, check
  * it, and convert if necessary.
  */
-param_value_search_or_json_required(Search, JSON, Param, Type, Value) :-
+param_value_search_or_json(Search, JSON, Param, Type, Value) :-
     (   param_value_search_(Search, Param, Type, Value)
     ->  true
     ;   param_value_json_(JSON, Param, Type, Value)
+    ->  true).
+
+/*
+ * Get the value of a required parameter from a search list or JSON dict, check
+ * it, and convert if necessary.
+ */
+param_value_search_or_json_required(Search, JSON, Param, Type, Value) :-
+    (   param_value_search_or_json(Search, JSON, Param, Type, Value)
     ->  true
     ;   throw(error(missing_parameter(Param), _))).
 
@@ -162,8 +180,6 @@ param_value_search_or_json_required(Search, JSON, Param, Type, Value) :-
  * it, and convert if necessary.
  */
 param_value_search_or_json_optional(Search, JSON, Param, Type, Default, Value) :-
-    (   param_value_search_(Search, Param, Type, Value)
-    ->  true
-    ;   param_value_json_(JSON, Param, Type, Value)
+    (   param_value_search_or_json(Search, JSON, Param, Type, Value)
     ->  true
     ;   Value = Default).
